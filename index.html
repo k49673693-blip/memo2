@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>計算・勉強用 手描きノートアプリ</title>
+<style>
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background-color: #f5f5f7;
+    overflow: hidden;
+  }
+  header {
+    background-color: #ffffff;
+    border-bottom: 1px solid #e0e0e0;
+    padding: 10px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    z-index: 10;
+  }
+  .tool-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn {
+    background-color: #f0f0f2;
+    border: 1px solid #d0d0d5;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .btn:hover {
+    background-color: #e4e4e8;
+  }
+  .btn.active {
+    background-color: #007aff;
+    color: white;
+    border-color: #007aff;
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .color-picker-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  input[type="color"] {
+    -webkit-appearance: none;
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+  input[type="color"]::-webkit-color-swatch {
+    border: 1px solid #ccc;
+    border-radius: 50%;
+  }
+  .size-label {
+    font-size: 12px;
+    color: #666;
+  }
+  input[type="range"] {
+    width: 80px;
+    cursor: pointer;
+  }
+  #canvas-container {
+    flex: 1;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    background-color: #ffffff;
+  }
+  canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    touch-action: none;
+  }
+  .grid-background {
+    background-image: linear-gradient(to right, #e8e8e8 1px, transparent 1px),
+                      linear-gradient(to bottom, #e8e8e8 1px, transparent 1px);
+    background-size: 25px 25px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <!-- モード選択 -->
+  <div class="tool-group">
+    <button id="tool-pen" class="btn active" onclick="setMode('pen')">✏️ ペン</button>
+    <button id="tool-eraser" class="btn" onclick="setMode('eraser')">🧹 消しゴム</button>
+    <button id="tool-lasso" class="btn" onclick="setMode('lasso')">⭕ 囲んで消去</button>
+  </div>
+
+  <!-- 太さと色 -->
+  <div class="tool-group">
+    <div class="color-picker-wrapper">
+      <input type="color" id="pen-color" value="#000000" onchange="updatePenColor()">
+    </div>
+    <span class="size-label">太さ:</span>
+    <input type="range" id="pen-size" min="1" max="30" value="3" oninput="updatePenSize()">
+    <span id="size-display" class="size-label">3px</span>
+  </div>
+
+  <!-- アクション -->
+  <div class="tool-group">
+    <button id="btn-undo" class="btn" onclick="undo()" disabled>↩️ 元に戻す</button>
+    <button class="btn" onclick="toggleGrid()">📐 背景切替</button>
+    <button class="btn" onclick="clearCanvas()" style="color: #d9534f;">🗑️ 全消去</button>
+  </div>
+</header>
+
+<div id="canvas-container" class="grid-background">
+  <canvas id="paintCanvas"></canvas>
+</div>
+
+<script>
+  const canvas = document.getElementById('paintCanvas');
+  const ctx = canvas.getContext('2d');
+  const container = document.getElementById('canvas-container');
+
+  let currentMode = 'pen'; // 'pen', 'eraser', 'lasso'
+  let isDrawing = false;
+  let currentColor = '#000000';
+  let currentSize = 3;
+  let hasGrid = true;
+
+  // 描画データ（ストロークの管理）
+  // Stroke: { type: 'pen'|'eraser', color, size, points: [{x, y}] }
+  let strokes = [];
+  let currentStroke = null;
+  let lassoPoints = [];
+
+  function resizeCanvas() {
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+    redrawCanvas();
+  }
+
+  window.addEventListener('resize', resizeCanvas);
+
+  function setMode(mode) {
+    currentMode = mode;
+    document.getElementById('tool-pen').classList.toggle('active', mode === 'pen');
+    document.getElementById('tool-eraser').classList.toggle('active', mode === 'eraser');
+    document.getElementById('tool-lasso').classList.toggle('active', mode === 'lasso');
+  }
+
+  function updatePenColor() {
+    currentColor = document.getElementById('pen-color').value;
+    if (currentMode === 'eraser') setMode('pen');
+  }
+
+  function updatePenSize() {
+    currentSize = parseInt(document.getElementById('pen-size').value, 10);
+    document.getElementById('size-display').innerText = `${currentSize}px`;
+  }
+
+  function toggleGrid() {
+    hasGrid = !hasGrid;
+    container.classList.toggle('grid-background', hasGrid);
+  }
+
+  function updateUndoButton() {
+    document.getElementById('btn-undo').disabled = strokes.length === 0;
+  }
+
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    if (e.touches && e.touches.length > 0) {
+      return {
+        x: e.touches[0].clientX - rect.left,
+        y: e.touches[0].clientY - rect.top
+      };
+    }
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+  }
+
+  // イベントリスナー開始
+  canvas.addEventListener('mousedown', startDrawing);
+  canvas.addEventListener('mousemove', draw);
+  canvas.addEventListener('mouseup', stopDrawing);
+  canvas.addEventListener('mouseleave', stopDrawing);
+
+  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDrawing(e); });
+  canvas.addEventListener('touchmove', (e) => { e.preventDefault(); draw(e); });
+  canvas.addEventListener('touchend', (e) => { e.preventDefault(); stopDrawing(e); });
+
+  function startDrawing(e) {
+    isDrawing = true;
+    const pos = getPos(e);
+
+    if (currentMode === 'lasso') {
+      lassoPoints = [pos];
+    } else {
+      currentStroke = {
+        type: currentMode,
+        color: currentColor,
+        size: currentSize,
+        points: [pos]
+      };
+    }
+  }
+
+  function draw(e) {
+    if (!isDrawing) return;
+    const pos = getPos(e);
+
+    if (currentMode === 'lasso') {
+      lassoPoints.push(pos);
+      redrawCanvas();
+      drawLassoLine();
+    } else {
+      currentStroke.points.push(pos);
+      redrawCanvas();
+      drawSingleStroke(currentStroke);
+    }
+  }
+
+  function stopDrawing() {
+    if (!isDrawing) return;
+    isDrawing = false;
+
+    if (currentMode === 'lasso') {
+      if (lassoPoints.length > 2) {
+        eraseStrokesInLasso(lassoPoints);
+      }
+      lassoPoints = [];
+      redrawCanvas();
+    } else if (currentStroke) {
+      if (currentStroke.points.length > 0) {
+        strokes.push(currentStroke);
+        updateUndoButton();
+      }
+      currentStroke = null;
+    }
+  }
+
+  // 1本のストロークを描画
+  function drawSingleStroke(stroke) {
+    if (!stroke || stroke.points.length === 0) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = stroke.size;
+
+    if (stroke.type === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = stroke.color;
+    }
+
+    const pts = stroke.points;
+    ctx.moveTo(pts[0].x, pts[0].y);
+
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineTo(pts[i].x, pts[i].y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 囲み線（破線）を表示
+  function drawLassoLine() {
+    if (lassoPoints.length < 2) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.strokeStyle = '#ff3b30';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]);
+    ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
+    for (let i = 1; i < lassoPoints.length; i++) {
+      ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // キャンバス全体を再描画
+  function redrawCanvas() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    strokes.forEach(stroke => drawSingleStroke(stroke));
+  }
+
+  // 囲まれた領域内のストロークを判定して削除
+  function eraseStrokesInLasso(polygon) {
+    let deletedCount = 0;
+    strokes = strokes.filter(stroke => {
+      // ストローク内のいずれかの点（または全点）がポリゴン内にあるか判定
+      const isInside = stroke.points.some(pt => isPointInPolygon(pt, polygon));
+      if (isInside) deletedCount++;
+      return !isInside;
+    });
+
+    if (deletedCount > 0) {
+      updateUndoButton();
+    }
+  }
+
+  // レイキャスト法で点が多角形内にあるか判定
+  function isPointInPolygon(point, polygon) {
+    let x = point.x, y = point.y;
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      let xi = polygon[i].x, yi = polygon[i].y;
+      let xj = polygon[j].x, yj = polygon[j].y;
+
+      let intersect = ((yi > y) !== (yj > y)) &&
+          (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  // 元に戻す (Undo)
+  function undo() {
+    if (strokes.length > 0) {
+      strokes.pop();
+      redrawCanvas();
+      updateUndoButton();
+    }
+  }
+
+  // 全消去
+  function clearCanvas() {
+    if (strokes.length === 0) return;
+    if (confirm('画面上のすべてを消去しますか？')) {
+      strokes = [];
+      redrawCanvas();
+      updateUndoButton();
+    }
+  }
+
+  // 初期化
+  resizeCanvas();
+</script>
+
+</body>
+</html>
