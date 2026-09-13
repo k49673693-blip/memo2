@@ -105,13 +105,6 @@
     width: 70px;
     cursor: pointer;
   }
-  .page-indicator {
-    font-size: 13px;
-    font-weight: bold;
-    color: #333;
-    min-width: 60px;
-    text-align: center;
-  }
   #canvas-container {
     flex: 1;
     position: relative;
@@ -138,26 +131,19 @@
   <!-- モード選択 -->
   <div class="tool-group">
     <button id="tool-pen" class="btn active" onclick="setMode('pen')">✏️ ペン</button>
-    <button id="tool-eraser" class="btn" onclick="setMode('eraser')">🧹 消しゴム</button>
+    <button id="tool-eraser" class="btn" onclick="setMode('eraser')">🧹 部分消しゴム</button>
+    <button id="tool-stroke-eraser" class="btn" onclick="setMode('stroke-eraser')">⚡ 線消しゴム</button>
     <button id="tool-lasso" class="btn" onclick="setMode('lasso')">⭕ 囲んで消去</button>
   </div>
 
   <!-- 太さと色 -->
   <div class="tool-group">
-    <div class="color-picker-wrapper">
+    <div class="color-picker-wrapper" id="color-picker-container">
       <input type="color" id="pen-color" value="#000000" onchange="updatePenColor()">
     </div>
-    <span class="size-label">太さ:</span>
-    <input type="range" id="pen-size" min="1" max="30" value="3" oninput="updatePenSize()">
+    <span class="size-label" id="size-title">ペンの太さ:</span>
+    <input type="range" id="size-slider" min="1" max="50" value="3" oninput="updateSize()">
     <span id="size-display" class="size-label">3px</span>
-  </div>
-
-  <!-- ページ操作 -->
-  <div class="tool-group">
-    <button id="btn-prev" class="btn" onclick="prevPage()">◀ 前へ</button>
-    <span id="page-display" class="page-indicator">1 / 1</span>
-    <button id="btn-next" class="btn" onclick="nextPage()">次へ ▶</button>
-    <button class="btn" onclick="addPage()">➕ ページ追加</button>
   </div>
 
   <!-- アクション -->
@@ -178,16 +164,17 @@
   const ctx = canvas.getContext('2d');
   const container = document.getElementById('canvas-container');
 
-  let currentMode = 'pen'; // 'pen', 'eraser', 'lasso'
+  let currentMode = 'pen'; // 'pen', 'eraser', 'stroke-eraser', 'lasso'
   let isDrawing = false;
+  
+  // ペンと消しゴムの設定を独立して保持
   let currentColor = '#000000';
-  let currentSize = 3;
+  let penSize = 3;
+  let eraserSize = 15;
   let hasGrid = true;
 
-  // ページ管理
-  let pages = [[]];
-  let currentPageIndex = 0;
-
+  // 描画データ（単一ページ）
+  let strokes = [];
   let currentStroke = null;
   let lassoPoints = [];
 
@@ -222,17 +209,48 @@
     currentMode = mode;
     document.getElementById('tool-pen').classList.toggle('active', mode === 'pen');
     document.getElementById('tool-eraser').classList.toggle('active', mode === 'eraser');
+    document.getElementById('tool-stroke-eraser').classList.toggle('active', mode === 'stroke-eraser');
     document.getElementById('tool-lasso').classList.toggle('active', mode === 'lasso');
+
+    // モード切り替え時にスライダーと色表示を更新
+    const slider = document.getElementById('size-slider');
+    const colorPicker = document.getElementById('color-picker-container');
+    const sizeTitle = document.getElementById('size-title');
+
+    if (mode === 'pen') {
+      colorPicker.style.display = 'flex';
+      sizeTitle.innerText = 'ペンの太さ:';
+      slider.value = penSize;
+    } else if (mode === 'eraser') {
+      colorPicker.style.display = 'none';
+      sizeTitle.innerText = '消しゴム:';
+      slider.value = eraserSize;
+    } else {
+      colorPicker.style.display = 'none';
+      sizeTitle.innerText = '消しゴム:';
+      slider.value = eraserSize;
+    }
+    updateSizeDisplay();
   }
 
   function updatePenColor() {
     currentColor = document.getElementById('pen-color').value;
-    if (currentMode === 'eraser') setMode('pen');
+    if (currentMode !== 'pen') setMode('pen');
   }
 
-  function updatePenSize() {
-    currentSize = parseInt(document.getElementById('pen-size').value, 10);
-    document.getElementById('size-display').innerText = `${currentSize}px`;
+  function updateSize() {
+    const val = parseInt(document.getElementById('size-slider').value, 10);
+    if (currentMode === 'pen') {
+      penSize = val;
+    } else {
+      eraserSize = val;
+    }
+    updateSizeDisplay();
+  }
+
+  function updateSizeDisplay() {
+    const currentVal = (currentMode === 'pen') ? penSize : eraserSize;
+    document.getElementById('size-display').innerText = `${currentVal}px`;
   }
 
   function toggleGrid() {
@@ -241,37 +259,7 @@
   }
 
   function updateUndoButton() {
-    document.getElementById('btn-undo').disabled = pages[currentPageIndex].length === 0;
-  }
-
-  function updatePageUI() {
-    document.getElementById('page-display').innerText = `${currentPageIndex + 1} / ${pages.length}`;
-    document.getElementById('btn-prev').disabled = currentPageIndex === 0;
-    document.getElementById('btn-next').disabled = currentPageIndex === pages.length - 1;
-    updateUndoButton();
-  }
-
-  function addPage() {
-    pages.push([]);
-    currentPageIndex = pages.length - 1;
-    updatePageUI();
-    redrawCanvas();
-  }
-
-  function prevPage() {
-    if (currentPageIndex > 0) {
-      currentPageIndex--;
-      updatePageUI();
-      redrawCanvas();
-    }
-  }
-
-  function nextPage() {
-    if (currentPageIndex < pages.length - 1) {
-      currentPageIndex++;
-      updatePageUI();
-      redrawCanvas();
-    }
+    document.getElementById('btn-undo').disabled = strokes.length === 0;
   }
 
   function resetZoom() {
@@ -376,11 +364,13 @@
 
     if (currentMode === 'lasso') {
       lassoPoints = [pos];
+    } else if (currentMode === 'stroke-eraser') {
+      eraseStrokeAtPos(pos);
     } else {
       currentStroke = {
         type: currentMode,
         color: currentColor,
-        size: currentSize,
+        size: (currentMode === 'pen') ? penSize : eraserSize,
         points: [pos]
       };
     }
@@ -394,6 +384,8 @@
       lassoPoints.push(pos);
       redrawCanvas();
       drawLassoLine();
+    } else if (currentMode === 'stroke-eraser') {
+      eraseStrokeAtPos(pos);
     } else {
       currentStroke.points.push(pos);
       redrawCanvas();
@@ -413,10 +405,32 @@
       redrawCanvas();
     } else if (currentStroke) {
       if (currentStroke.points.length > 0) {
-        pages[currentPageIndex].push(currentStroke);
+        strokes.push(currentStroke);
         updateUndoButton();
       }
       currentStroke = null;
+    }
+  }
+
+  // タッチ位置にあるストロークを丸ごと消去（線消しゴム）
+  function eraseStrokeAtPos(pos) {
+    const threshold = eraserSize / 2;
+    let erased = false;
+
+    strokes = strokes.filter(stroke => {
+      // 触れたかどうか判定
+      const touched = stroke.points.some(pt => {
+        const dx = pt.x - pos.x;
+        const dy = pt.y - pos.y;
+        return Math.sqrt(dx * dx + dy * dy) <= threshold;
+      });
+      if (touched) erased = true;
+      return !touched;
+    });
+
+    if (erased) {
+      redrawCanvas();
+      updateUndoButton();
     }
   }
 
@@ -467,13 +481,12 @@
 
   function redrawCanvas() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const currentStrokes = pages[currentPageIndex] || [];
-    currentStrokes.forEach(stroke => drawSingleStroke(stroke));
+    strokes.forEach(stroke => drawSingleStroke(stroke));
   }
 
   function eraseStrokesInLasso(polygon) {
     let deletedCount = 0;
-    pages[currentPageIndex] = pages[currentPageIndex].filter(stroke => {
+    strokes = strokes.filter(stroke => {
       const isInside = stroke.points.some(pt => isPointInPolygon(pt, polygon));
       if (isInside) deletedCount++;
       return !isInside;
@@ -499,24 +512,24 @@
   }
 
   function undo() {
-    if (pages[currentPageIndex].length > 0) {
-      pages[currentPageIndex].pop();
+    if (strokes.length > 0) {
+      strokes.pop();
       redrawCanvas();
       updateUndoButton();
     }
   }
 
   function clearCanvas() {
-    if (pages[currentPageIndex].length === 0) return;
-    if (confirm('現在のページの描画をすべて消去しますか？')) {
-      pages[currentPageIndex] = [];
+    if (strokes.length === 0) return;
+    if (confirm('画面上のすべてを消去しますか？')) {
+      strokes = [];
       redrawCanvas();
       updateUndoButton();
     }
   }
 
   resizeCanvas();
-  updatePageUI();
+  updateUndoButton();
 </script>
 
 </body>
