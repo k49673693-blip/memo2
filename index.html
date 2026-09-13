@@ -3,6 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+<!-- フルスクリーン（アドレスバー非表示）用の設定 -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ffffff">
+
 <title>計算・勉強用 手描きノートアプリ</title>
 
 <!-- アプリ（PWA）化のための設定 -->
@@ -178,7 +185,6 @@
   let hasGrid = true;
 
   // ページ管理
-  // pages = [ [stroke1, stroke2, ...], [stroke1, ...], ... ]
   let pages = [[]];
   let currentPageIndex = 0;
 
@@ -276,7 +282,6 @@
     redrawCanvas();
   }
 
-  // 画面座標（ピクセル）からキャンバス上の論理座標に変換
   function getPos(e) {
     const rect = canvas.getBoundingClientRect();
     let clientX, clientY;
@@ -296,14 +301,12 @@
     };
   }
 
-  // 2点間の距離を計算
   function getDistance(t1, t2) {
     const dx = t1.clientX - t2.clientX;
     const dy = t1.clientY - t2.clientY;
     return Math.sqrt(dx * dx + dy * dy);
   }
 
-  // 2点の中心点を計算
   function getCenter(t1, t2) {
     return {
       x: (t1.clientX + t2.clientX) / 2,
@@ -311,17 +314,14 @@
     };
   }
 
-  // マウスイベント
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
   canvas.addEventListener('mouseup', stopDrawing);
   canvas.addEventListener('mouseleave', stopDrawing);
 
-  // タッチイベント
   canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
     if (e.touches.length === 2) {
-      // ピンチ操作（拡大縮小・移動）の開始
       isMultiTouch = true;
       isDrawing = false;
       currentStroke = null;
@@ -338,15 +338,13 @@
   canvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
     if (e.touches.length === 2 && isMultiTouch) {
-      // 拡大縮小・移動の計算
       const newDist = getDistance(e.touches[0], e.touches[1]);
       const newCenter = getCenter(e.touches[0], e.touches[1]);
       
       const factor = newDist / touchStartDist;
       let newScale = touchStartScale * factor;
-      newScale = Math.max(0.3, Math.min(newScale, 10)); // ズーム限界(0.3倍〜10倍)
+      newScale = Math.max(0.3, Math.min(newScale, 10));
 
-      // 中心点を維持して拡大縮小
       const centerCanvasX = (touchStartCenter.x - touchStartOffset.x);
       const centerCanvasY = (touchStartCenter.y - touchStartOffset.y);
 
@@ -422,12 +420,11 @@
     }
   }
 
-  // ストローク描画（変形行列で高精細に描画）
   function drawSingleStroke(stroke) {
     if (!stroke || stroke.points.length === 0) return;
 
     ctx.save();
-    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY); // 拡大縮小・座標の変換
+    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
 
     ctx.beginPath();
     ctx.lineCap = 'round';
@@ -451,7 +448,6 @@
     ctx.restore();
   }
 
-  // 囲み線描画
   function drawLassoLine() {
     if (lassoPoints.length < 2) return;
     ctx.save();
@@ -519,7 +515,6 @@
     }
   }
 
-  // 初期化
   resizeCanvas();
   updatePageUI();
 </script>
