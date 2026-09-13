@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>計算・勉強用 手描きノートアプリ</title>
 
 <!-- アプリ（PWA）化のための設定 -->
@@ -19,6 +19,7 @@
     margin: 0;
     padding: 0;
     user-select: none;
+    -webkit-user-select: none;
   }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -31,10 +32,10 @@
   header {
     background-color: #ffffff;
     border-bottom: 1px solid #e0e0e0;
-    padding: 10px 16px;
+    padding: 8px 12px;
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 8px;
     align-items: center;
     justify-content: space-between;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
@@ -43,14 +44,14 @@
   .tool-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   .btn {
     background-color: #f0f0f2;
     border: 1px solid #d0d0d5;
     border-radius: 6px;
-    padding: 6px 12px;
-    font-size: 14px;
+    padding: 6px 10px;
+    font-size: 13px;
     cursor: pointer;
     transition: all 0.2s;
     display: flex;
@@ -72,13 +73,13 @@
   .color-picker-wrapper {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
   }
   input[type="color"] {
     -webkit-appearance: none;
     border: none;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     cursor: pointer;
   }
@@ -94,8 +95,15 @@
     color: #666;
   }
   input[type="range"] {
-    width: 80px;
+    width: 70px;
     cursor: pointer;
+  }
+  .page-indicator {
+    font-size: 13px;
+    font-weight: bold;
+    color: #333;
+    min-width: 60px;
+    text-align: center;
   }
   #canvas-container {
     flex: 1;
@@ -103,6 +111,7 @@
     width: 100%;
     height: 100%;
     background-color: #ffffff;
+    overflow: hidden;
   }
   canvas {
     position: absolute;
@@ -113,7 +122,6 @@
   .grid-background {
     background-image: linear-gradient(to right, #e8e8e8 1px, transparent 1px),
                       linear-gradient(to bottom, #e8e8e8 1px, transparent 1px);
-    background-size: 25px 25px;
   }
 </style>
 </head>
@@ -137,9 +145,18 @@
     <span id="size-display" class="size-label">3px</span>
   </div>
 
+  <!-- ページ操作 -->
+  <div class="tool-group">
+    <button id="btn-prev" class="btn" onclick="prevPage()">◀ 前へ</button>
+    <span id="page-display" class="page-indicator">1 / 1</span>
+    <button id="btn-next" class="btn" onclick="nextPage()">次へ ▶</button>
+    <button class="btn" onclick="addPage()">➕ ページ追加</button>
+  </div>
+
   <!-- アクション -->
   <div class="tool-group">
     <button id="btn-undo" class="btn" onclick="undo()" disabled>↩️ 元に戻す</button>
+    <button class="btn" onclick="resetZoom()">🔍 拡大リセット</button>
     <button class="btn" onclick="toggleGrid()">📐 背景切替</button>
     <button class="btn" onclick="clearCanvas()" style="color: #d9534f;">🗑️ 全消去</button>
   </div>
@@ -160,18 +177,40 @@
   let currentSize = 3;
   let hasGrid = true;
 
-  // 描画データ（ストロークの管理）
-  let strokes = [];
+  // ページ管理
+  // pages = [ [stroke1, stroke2, ...], [stroke1, ...], ... ]
+  let pages = [[]];
+  let currentPageIndex = 0;
+
   let currentStroke = null;
   let lassoPoints = [];
+
+  // ズーム・パン移動用の変数
+  let scale = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  let isMultiTouch = false;
+  let touchStartDist = 0;
+  let touchStartScale = 1;
+  let touchStartCenter = { x: 0, y: 0 };
+  let touchStartOffset = { x: 0, y: 0 };
 
   function resizeCanvas() {
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
+    updateGridSize();
     redrawCanvas();
   }
 
   window.addEventListener('resize', resizeCanvas);
+
+  function updateGridSize() {
+    const gridSize = 25 * scale;
+    const bgPosX = offsetX % gridSize;
+    const bgPosY = offsetY % gridSize;
+    container.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+    container.style.backgroundPosition = `${bgPosX}px ${bgPosY}px`;
+  }
 
   function setMode(mode) {
     currentMode = mode;
@@ -196,34 +235,144 @@
   }
 
   function updateUndoButton() {
-    document.getElementById('btn-undo').disabled = strokes.length === 0;
+    document.getElementById('btn-undo').disabled = pages[currentPageIndex].length === 0;
   }
 
+  function updatePageUI() {
+    document.getElementById('page-display').innerText = `${currentPageIndex + 1} / ${pages.length}`;
+    document.getElementById('btn-prev').disabled = currentPageIndex === 0;
+    document.getElementById('btn-next').disabled = currentPageIndex === pages.length - 1;
+    updateUndoButton();
+  }
+
+  function addPage() {
+    pages.push([]);
+    currentPageIndex = pages.length - 1;
+    updatePageUI();
+    redrawCanvas();
+  }
+
+  function prevPage() {
+    if (currentPageIndex > 0) {
+      currentPageIndex--;
+      updatePageUI();
+      redrawCanvas();
+    }
+  }
+
+  function nextPage() {
+    if (currentPageIndex < pages.length - 1) {
+      currentPageIndex++;
+      updatePageUI();
+      redrawCanvas();
+    }
+  }
+
+  function resetZoom() {
+    scale = 1;
+    offsetX = 0;
+    offsetY = 0;
+    updateGridSize();
+    redrawCanvas();
+  }
+
+  // 画面座標（ピクセル）からキャンバス上の論理座標に変換
   function getPos(e) {
     const rect = canvas.getBoundingClientRect();
+    let clientX, clientY;
     if (e.touches && e.touches.length > 0) {
-      return {
-        x: e.touches[0].clientX - rect.left,
-        y: e.touches[0].clientY - rect.top
-      };
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
     }
+    const screenX = clientX - rect.left;
+    const screenY = clientY - rect.top;
+
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      x: (screenX - offsetX) / scale,
+      y: (screenY - offsetY) / scale
     };
   }
 
-  // イベントリスナー開始
+  // 2点間の距離を計算
+  function getDistance(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  // 2点の中心点を計算
+  function getCenter(t1, t2) {
+    return {
+      x: (t1.clientX + t2.clientX) / 2,
+      y: (t1.clientY + t2.clientY) / 2
+    };
+  }
+
+  // マウスイベント
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
   canvas.addEventListener('mouseup', stopDrawing);
   canvas.addEventListener('mouseleave', stopDrawing);
 
-  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDrawing(e); });
-  canvas.addEventListener('touchmove', (e) => { e.preventDefault(); draw(e); });
-  canvas.addEventListener('touchend', (e) => { e.preventDefault(); stopDrawing(e); });
+  // タッチイベント
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      // ピンチ操作（拡大縮小・移動）の開始
+      isMultiTouch = true;
+      isDrawing = false;
+      currentStroke = null;
+      lassoPoints = [];
+      touchStartDist = getDistance(e.touches[0], e.touches[1]);
+      touchStartScale = scale;
+      touchStartCenter = getCenter(e.touches[0], e.touches[1]);
+      touchStartOffset = { x: offsetX, y: offsetY };
+    } else if (e.touches.length === 1 && !isMultiTouch) {
+      startDrawing(e);
+    }
+  });
+
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 2 && isMultiTouch) {
+      // 拡大縮小・移動の計算
+      const newDist = getDistance(e.touches[0], e.touches[1]);
+      const newCenter = getCenter(e.touches[0], e.touches[1]);
+      
+      const factor = newDist / touchStartDist;
+      let newScale = touchStartScale * factor;
+      newScale = Math.max(0.3, Math.min(newScale, 10)); // ズーム限界(0.3倍〜10倍)
+
+      // 中心点を維持して拡大縮小
+      const centerCanvasX = (touchStartCenter.x - touchStartOffset.x);
+      const centerCanvasY = (touchStartCenter.y - touchStartOffset.y);
+
+      scale = newScale;
+      offsetX = newCenter.x - centerCanvasX * (newScale / touchStartScale);
+      offsetY = newCenter.y - centerCanvasY * (newScale / touchStartScale);
+
+      updateGridSize();
+      redrawCanvas();
+    } else if (e.touches.length === 1 && !isMultiTouch) {
+      draw(e);
+    }
+  });
+
+  canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (e.touches.length < 2) {
+      isMultiTouch = false;
+    }
+    if (e.touches.length === 0) {
+      stopDrawing();
+    }
+  });
 
   function startDrawing(e) {
+    if (isMultiTouch) return;
     isDrawing = true;
     const pos = getPos(e);
 
@@ -240,7 +389,7 @@
   }
 
   function draw(e) {
-    if (!isDrawing) return;
+    if (!isDrawing || isMultiTouch) return;
     const pos = getPos(e);
 
     if (currentMode === 'lasso') {
@@ -266,18 +415,20 @@
       redrawCanvas();
     } else if (currentStroke) {
       if (currentStroke.points.length > 0) {
-        strokes.push(currentStroke);
+        pages[currentPageIndex].push(currentStroke);
         updateUndoButton();
       }
       currentStroke = null;
     }
   }
 
-  // 1本のストロークを描画
+  // ストローク描画（変形行列で高精細に描画）
   function drawSingleStroke(stroke) {
     if (!stroke || stroke.points.length === 0) return;
 
     ctx.save();
+    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY); // 拡大縮小・座標の変換
+
     ctx.beginPath();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -300,14 +451,15 @@
     ctx.restore();
   }
 
-  // 囲み線（破線）を表示
+  // 囲み線描画
   function drawLassoLine() {
     if (lassoPoints.length < 2) return;
     ctx.save();
+    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
     ctx.beginPath();
     ctx.strokeStyle = '#ff3b30';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 6]);
+    ctx.lineWidth = 2 / scale;
+    ctx.setLineDash([6 / scale, 6 / scale]);
     ctx.moveTo(lassoPoints[0].x, lassoPoints[0].y);
     for (let i = 1; i < lassoPoints.length; i++) {
       ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
@@ -317,16 +469,15 @@
     ctx.restore();
   }
 
-  // キャンバス全体を再描画
   function redrawCanvas() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    strokes.forEach(stroke => drawSingleStroke(stroke));
+    const currentStrokes = pages[currentPageIndex] || [];
+    currentStrokes.forEach(stroke => drawSingleStroke(stroke));
   }
 
-  // 囲まれた領域内のストロークを判定して削除
   function eraseStrokesInLasso(polygon) {
     let deletedCount = 0;
-    strokes = strokes.filter(stroke => {
+    pages[currentPageIndex] = pages[currentPageIndex].filter(stroke => {
       const isInside = stroke.points.some(pt => isPointInPolygon(pt, polygon));
       if (isInside) deletedCount++;
       return !isInside;
@@ -337,7 +488,6 @@
     }
   }
 
-  // レイキャスト法で点が多角形内にあるか判定
   function isPointInPolygon(point, polygon) {
     let x = point.x, y = point.y;
     let inside = false;
@@ -352,20 +502,18 @@
     return inside;
   }
 
-  // 元に戻す (Undo)
   function undo() {
-    if (strokes.length > 0) {
-      strokes.pop();
+    if (pages[currentPageIndex].length > 0) {
+      pages[currentPageIndex].pop();
       redrawCanvas();
       updateUndoButton();
     }
   }
 
-  // 全消去
   function clearCanvas() {
-    if (strokes.length === 0) return;
-    if (confirm('画面上のすべてを消去しますか？')) {
-      strokes = [];
+    if (pages[currentPageIndex].length === 0) return;
+    if (confirm('現在のページの描画をすべて消去しますか？')) {
+      pages[currentPageIndex] = [];
       redrawCanvas();
       updateUndoButton();
     }
@@ -373,6 +521,7 @@
 
   // 初期化
   resizeCanvas();
+  updatePageUI();
 </script>
 
 </body>
