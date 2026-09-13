@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>計算・勉強用 手描きノートアプリ</title>
+
+<!-- アプリ（PWA）化のための設定 -->
+<link rel="manifest" href="manifest.json">
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+  }
+</script>
+
 <style>
   * {
     box-sizing: border-box;
@@ -152,7 +161,6 @@
   let hasGrid = true;
 
   // 描画データ（ストロークの管理）
-  // Stroke: { type: 'pen'|'eraser', color, size, points: [{x, y}] }
   let strokes = [];
   let currentStroke = null;
   let lassoPoints = [];
@@ -319,7 +327,6 @@
   function eraseStrokesInLasso(polygon) {
     let deletedCount = 0;
     strokes = strokes.filter(stroke => {
-      // ストローク内のいずれかの点（または全点）がポリゴン内にあるか判定
       const isInside = stroke.points.some(pt => isPointInPolygon(pt, polygon));
       if (isInside) deletedCount++;
       return !isInside;
