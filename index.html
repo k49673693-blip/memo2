@@ -133,7 +133,7 @@
     <button id="tool-pen" class="btn active" onclick="setMode('pen')">✏️ ペン</button>
     <button id="tool-eraser" class="btn" onclick="setMode('eraser')">🧹 部分消しゴム</button>
     <button id="tool-stroke-eraser" class="btn" onclick="setMode('stroke-eraser')">⚡ 線消しゴム</button>
-    <button id="tool-lasso" class="btn" onclick="setMode('lasso')">⭕ 囲んで消去</button>
+    <button id="tool-lasso" class="btn" onclick="setMode('lasso')">⭕ 囲んで移動/消去</button>
   </div>
 
   <!-- 太さと色 -->
@@ -142,12 +142,13 @@
       <input type="color" id="pen-color" value="#000000" onchange="updatePenColor()">
     </div>
     <span class="size-label" id="size-title">ペンの太さ:</span>
-    <input type="range" id="size-slider" min="1" max="10" value="3" oninput="updateSize()">
-    <span id="size-display" class="size-label">2px</span>
+    <input type="range" id="size-slider" min="1" max="50" value="3" oninput="updateSize()">
+    <span id="size-display" class="size-label">3px</span>
   </div>
 
   <!-- アクション -->
   <div class="tool-group">
+    <button id="btn-delete-selected" class="btn" onclick="deleteSelection()" style="display:none; color: #d9534f;">🗑️ 選択範囲を消去</button>
     <button id="btn-undo" class="btn" onclick="undo()" disabled>↩️ 元に戻す</button>
     <button class="btn" onclick="resetZoom()">🔍 拡大リセット</button>
     <button class="btn" onclick="toggleGrid()">📐 背景切替</button>
@@ -167,18 +168,24 @@
   let currentMode = 'pen'; // 'pen', 'eraser', 'stroke-eraser', 'lasso'
   let isDrawing = false;
   
-  // ペンと消しゴムの設定を独立して保持
   let currentColor = '#000000';
   let penSize = 3;
   let eraserSize = 15;
   let hasGrid = true;
 
-  // 描画データ（単一ページ）
+  // 描画データ & 履歴スタック（Undo対応）
   let strokes = [];
+  let historyStack = []; // 状態履歴
   let currentStroke = null;
+  
+  // 投げなわ選択・移動用
   let lassoPoints = [];
+  let selectedStrokeIndices = [];
+  let isMovingSelection = false;
+  let dragStartPos = null;
+  let selectionBoundingBox = null;
 
-  // ズーム・パン移動用の変数
+  // ズーム・パン移動変数
   let scale = 1;
   let offsetX = 0;
   let offsetY = 0;
@@ -205,14 +212,24 @@
     container.style.backgroundPosition = `${bgPosX}px ${bgPosY}px`;
   }
 
+  // 履歴保存（全操作をUndo対象に）
+  function saveHistory() {
+    historyStack.push(JSON.parse(JSON.stringify(strokes)));
+    if (historyStack.length > 30) historyStack.shift(); // 上限30ステップ
+    updateUndoButton();
+  }
+
   function setMode(mode) {
+    if (selectedStrokeIndices.length > 0 && mode !== 'lasso') {
+      clearSelection();
+    }
+
     currentMode = mode;
     document.getElementById('tool-pen').classList.toggle('active', mode === 'pen');
     document.getElementById('tool-eraser').classList.toggle('active', mode === 'eraser');
     document.getElementById('tool-stroke-eraser').classList.toggle('active', mode === 'stroke-eraser');
     document.getElementById('tool-lasso').classList.toggle('active', mode === 'lasso');
 
-    // モード切り替え時にスライダーと色表示を更新
     const slider = document.getElementById('size-slider');
     const colorPicker = document.getElementById('color-picker-container');
     const sizeTitle = document.getElementById('size-title');
@@ -221,10 +238,6 @@
       colorPicker.style.display = 'flex';
       sizeTitle.innerText = 'ペンの太さ:';
       slider.value = penSize;
-    } else if (mode === 'eraser') {
-      colorPicker.style.display = 'none';
-      sizeTitle.innerText = '消しゴム:';
-      slider.value = eraserSize;
     } else {
       colorPicker.style.display = 'none';
       sizeTitle.innerText = '消しゴム:';
@@ -259,7 +272,7 @@
   }
 
   function updateUndoButton() {
-    document.getElementById('btn-undo').disabled = strokes.length === 0;
+    document.getElementById('btn-undo').disabled = historyStack.length === 0;
   }
 
   function resetZoom() {
@@ -302,6 +315,7 @@
     };
   }
 
+  // イベントリスナー
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
   canvas.addEventListener('mouseup', stopDrawing);
@@ -312,8 +326,8 @@
     if (e.touches.length === 2) {
       isMultiTouch = true;
       isDrawing = false;
+      isMovingSelection = false;
       currentStroke = null;
-      lassoPoints = [];
       touchStartDist = getDistance(e.touches[0], e.touches[1]);
       touchStartScale = scale;
       touchStartCenter = getCenter(e.touches[0], e.touches[1]);
@@ -359,26 +373,75 @@
 
   function startDrawing(e) {
     if (isMultiTouch) return;
-    isDrawing = true;
     const pos = getPos(e);
 
     if (currentMode === 'lasso') {
+      // 選択範囲内のタップなら移動モードへ
+      if (selectedStrokeIndices.length > 0 && selectionBoundingBox && isPointInBox(pos, selectionBoundingBox)) {
+        isMovingSelection = true;
+        dragStartPos = pos;
+        saveHistory();
+        return;
+      }
+
+      // 新しい投げなわ選択開始
+      clearSelection();
+      isDrawing = true;
       lassoPoints = [pos];
     } else if (currentMode === 'stroke-eraser') {
+      isDrawing = true;
+      saveHistory();
       eraseStrokeAtPos(pos);
-    } else {
+    } else if (currentMode === 'eraser') {
+      isDrawing = true;
+      saveHistory();
       currentStroke = {
-        type: currentMode,
+        type: 'eraser',
+        color: '#000000',
+        size: eraserSize,
+        points: [pos]
+      };
+    } else {
+      isDrawing = true;
+      saveHistory();
+      currentStroke = {
+        type: 'pen',
         color: currentColor,
-        size: (currentMode === 'pen') ? penSize : eraserSize,
+        size: penSize,
         points: [pos]
       };
     }
   }
 
   function draw(e) {
-    if (!isDrawing || isMultiTouch) return;
+    if (isMultiTouch) return;
     const pos = getPos(e);
+
+    if (isMovingSelection && dragStartPos) {
+      // 選択範囲の平行移動
+      const dx = pos.x - dragStartPos.x;
+      const dy = pos.y - dragStartPos.y;
+
+      selectedStrokeIndices.forEach(idx => {
+        strokes[idx].points.forEach(pt => {
+          pt.x += dx;
+          pt.y += dy;
+        });
+      });
+
+      if (selectionBoundingBox) {
+        selectionBoundingBox.minX += dx;
+        selectionBoundingBox.maxX += dx;
+        selectionBoundingBox.minY += dy;
+        selectionBoundingBox.maxY += dy;
+      }
+
+      dragStartPos = pos;
+      redrawCanvas();
+      return;
+    }
+
+    if (!isDrawing) return;
 
     if (currentMode === 'lasso') {
       lassoPoints.push(pos);
@@ -386,7 +449,7 @@
       drawLassoLine();
     } else if (currentMode === 'stroke-eraser') {
       eraseStrokeAtPos(pos);
-    } else {
+    } else if (currentStroke) {
       currentStroke.points.push(pos);
       redrawCanvas();
       drawSingleStroke(currentStroke);
@@ -394,31 +457,35 @@
   }
 
   function stopDrawing() {
+    if (isMovingSelection) {
+      isMovingSelection = false;
+      dragStartPos = null;
+      return;
+    }
+
     if (!isDrawing) return;
     isDrawing = false;
 
     if (currentMode === 'lasso') {
       if (lassoPoints.length > 2) {
-        eraseStrokesInLasso(lassoPoints);
+        selectStrokesInLasso(lassoPoints);
       }
       lassoPoints = [];
       redrawCanvas();
     } else if (currentStroke) {
       if (currentStroke.points.length > 0) {
         strokes.push(currentStroke);
-        updateUndoButton();
       }
       currentStroke = null;
     }
   }
 
-  // タッチ位置にあるストロークを丸ごと消去（線消しゴム）
+  // 線消しゴム
   function eraseStrokeAtPos(pos) {
     const threshold = eraserSize / 2;
     let erased = false;
 
     strokes = strokes.filter(stroke => {
-      // 触れたかどうか判定
       const touched = stroke.points.some(pt => {
         const dx = pt.x - pos.x;
         const dy = pt.y - pos.y;
@@ -430,7 +497,6 @@
 
     if (erased) {
       redrawCanvas();
-      updateUndoButton();
     }
   }
 
@@ -479,21 +545,53 @@
     ctx.restore();
   }
 
+  // 選択バウンディングボックスの描画
+  function drawSelectionBox() {
+    if (!selectionBoundingBox) return;
+
+    ctx.save();
+    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+    ctx.beginPath();
+    ctx.strokeStyle = '#007aff';
+    ctx.lineWidth = 2 / scale;
+    ctx.setLineDash([4 / scale, 4 / scale]);
+
+    const pad = 8 / scale;
+    const box = selectionBoundingBox;
+    ctx.rect(box.minX - pad, box.minY - pad, (box.maxX - box.minX) + pad * 2, (box.maxY - box.minY) + pad * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function redrawCanvas() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     strokes.forEach(stroke => drawSingleStroke(stroke));
+    drawSelectionBox();
   }
 
-  function eraseStrokesInLasso(polygon) {
-    let deletedCount = 0;
-    strokes = strokes.filter(stroke => {
+  // 投げなわ選択処理
+  function selectStrokesInLasso(polygon) {
+    selectedStrokeIndices = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    strokes.forEach((stroke, idx) => {
       const isInside = stroke.points.some(pt => isPointInPolygon(pt, polygon));
-      if (isInside) deletedCount++;
-      return !isInside;
+      if (isInside) {
+        selectedStrokeIndices.push(idx);
+        stroke.points.forEach(pt => {
+          if (pt.x < minX) minX = pt.x;
+          if (pt.x > maxX) maxX = pt.x;
+          if (pt.y < minY) minY = pt.y;
+          if (pt.y > maxY) maxY = pt.y;
+        });
+      }
     });
 
-    if (deletedCount > 0) {
-      updateUndoButton();
+    if (selectedStrokeIndices.length > 0) {
+      selectionBoundingBox = { minX, minY, maxX, maxY };
+      document.getElementById('btn-delete-selected').style.display = 'inline-flex';
+    } else {
+      clearSelection();
     }
   }
 
@@ -511,20 +609,45 @@
     return inside;
   }
 
+  function isPointInBox(pt, box) {
+    const pad = 12 / scale;
+    return pt.x >= box.minX - pad && pt.x <= box.maxX + pad &&
+           pt.y >= box.minY - pad && pt.y <= box.maxY + pad;
+  }
+
+  function clearSelection() {
+    selectedStrokeIndices = [];
+    selectionBoundingBox = null;
+    document.getElementById('btn-delete-selected').style.display = 'none';
+    redrawCanvas();
+  }
+
+  function deleteSelection() {
+    if (selectedStrokeIndices.length === 0) return;
+    saveHistory();
+
+    strokes = strokes.filter((_, idx) => !selectedStrokeIndices.includes(idx));
+    clearSelection();
+  }
+
+  // 元に戻す (Undo)
   function undo() {
-    if (strokes.length > 0) {
-      strokes.pop();
+    if (historyStack.length > 0) {
+      strokes = historyStack.pop();
+      clearSelection();
       redrawCanvas();
       updateUndoButton();
     }
   }
 
+  // 全消去
   function clearCanvas() {
     if (strokes.length === 0) return;
     if (confirm('画面上のすべてを消去しますか？')) {
+      saveHistory();
       strokes = [];
+      clearSelection();
       redrawCanvas();
-      updateUndoButton();
     }
   }
 
