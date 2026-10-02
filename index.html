@@ -77,26 +77,40 @@
     opacity: 0.4;
     cursor: not-allowed;
   }
-  .color-picker-wrapper {
+  
+  /* カスタム色選択ボタン */
+  .color-btn-wrapper {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 4px;
   }
-  input[type="color"] {
-    -webkit-appearance: none;
-    border: none;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
+  .color-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background-color: #f0f0f2;
+    border: 1px solid #d0d0d5;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
     cursor: pointer;
   }
-  input[type="color"]::-webkit-color-swatch-wrapper {
-    padding: 0;
-  }
-  input[type="color"]::-webkit-color-swatch {
-    border: 1px solid #ccc;
+  .color-dot {
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.2);
+    background-color: #000000;
   }
+  /* 隠しカラーピッカー */
+  #pen-color {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    pointer-events: none;
+  }
+
   .size-label {
     font-size: 12px;
     color: #666;
@@ -138,11 +152,17 @@
 
   <!-- 太さと色 -->
   <div class="tool-group">
-    <div class="color-picker-wrapper" id="color-picker-container">
-      <input type="color" id="pen-color" value="#000000" onchange="updatePenColor()">
+    <!-- 単押しで切り替え / 長押しでカラーパレット -->
+    <div class="color-btn-wrapper" id="color-picker-container">
+      <button id="color-toggle-btn" class="color-toggle-btn">
+        <span id="color-dot" class="color-dot"></span>
+        <span id="color-label">黒/赤</span>
+      </button>
+      <input type="color" id="pen-color" value="#000000" onchange="updateCustomColor(this.value)">
     </div>
+
     <span class="size-label" id="size-title">ペンの太さ:</span>
-    <input type="range" id="size-slider" min="1" max="5" value="1" oninput="updateSize()">
+    <input type="range" id="size-slider" min="1" max="5" value="3" oninput="updateSize()">
     <span id="size-display" class="size-label">1px</span>
   </div>
 
@@ -165,17 +185,17 @@
   const ctx = canvas.getContext('2d');
   const container = document.getElementById('canvas-container');
 
-  let currentMode = 'pen'; // 'pen', 'eraser', 'stroke-eraser', 'lasso'
+  let currentMode = 'pen'; 
   let isDrawing = false;
   
-  let currentColor = '#000000';
+  let currentColor = '#000000'; // デフォルトは黒
   let penSize = 1;
   let eraserSize = 1;
   let hasGrid = true;
 
   // 描画データ & 履歴スタック（Undo対応）
   let strokes = [];
-  let historyStack = []; // 状態履歴
+  let historyStack = [];
   let currentStroke = null;
   
   // 投げなわ選択・移動用
@@ -195,6 +215,68 @@
   let touchStartCenter = { x: 0, y: 0 };
   let touchStartOffset = { x: 0, y: 0 };
 
+  // --- 色選択（単押し黒赤切替 / 長押しカラーパレット）の実装 ---
+  const colorBtn = document.getElementById('color-toggle-btn');
+  const colorDot = document.getElementById('color-dot');
+  const colorPickerInput = document.getElementById('pen-color');
+  let longPressTimer = null;
+  let isLongPress = false;
+
+  function applyColor(hex) {
+    currentColor = hex;
+    colorDot.style.backgroundColor = hex;
+    colorPickerInput.value = hex;
+    if (currentMode !== 'pen') setMode('pen');
+  }
+
+  // 単押し：黒と赤の交互切替
+  function toggleBlackRed() {
+    if (currentColor.toLowerCase() === '#000000') {
+      applyColor('#ff0000'); // 赤へ
+    } else {
+      applyColor('#000000'); // 黒へ
+    }
+  }
+
+  // カラーパレットから任意の色が選ばれたとき
+  function updateCustomColor(hex) {
+    applyColor(hex);
+  }
+
+  // 長押し判定イベント
+  function startColorPress() {
+    isLongPress = false;
+    longPressTimer = setTimeout(() => {
+      isLongPress = true;
+      // カラーパレットを開く
+      colorPickerInput.click();
+    }, 450); // 0.45秒長押しでパレット表示
+  }
+
+  function endColorPress(e) {
+    clearTimeout(longPressTimer);
+    if (!isLongPress) {
+      // 短押しと判定された場合のみ切り替え実行
+      toggleBlackRed();
+    }
+    isLongPress = false;
+  }
+
+  colorBtn.addEventListener('mousedown', startColorPress);
+  colorBtn.addEventListener('mouseup', endColorPress);
+  colorBtn.addEventListener('mouseleave', () => clearTimeout(longPressTimer));
+
+  colorBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    startColorPress();
+  });
+  colorBtn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    endColorPress(e);
+  });
+
+  // ----------------------------------------------------
+
   function resizeCanvas() {
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
@@ -212,10 +294,9 @@
     container.style.backgroundPosition = `${bgPosX}px ${bgPosY}px`;
   }
 
-  // 履歴保存（全操作をUndo対象に）
   function saveHistory() {
     historyStack.push(JSON.parse(JSON.stringify(strokes)));
-    if (historyStack.length > 30) historyStack.shift(); // 上限30ステップ
+    if (historyStack.length > 30) historyStack.shift();
     updateUndoButton();
   }
 
@@ -244,11 +325,6 @@
       slider.value = eraserSize;
     }
     updateSizeDisplay();
-  }
-
-  function updatePenColor() {
-    currentColor = document.getElementById('pen-color').value;
-    if (currentMode !== 'pen') setMode('pen');
   }
 
   function updateSize() {
@@ -315,7 +391,6 @@
     };
   }
 
-  // イベントリスナー
   canvas.addEventListener('mousedown', startDrawing);
   canvas.addEventListener('mousemove', draw);
   canvas.addEventListener('mouseup', stopDrawing);
@@ -376,7 +451,6 @@
     const pos = getPos(e);
 
     if (currentMode === 'lasso') {
-      // 選択範囲内のタップなら移動モードへ
       if (selectedStrokeIndices.length > 0 && selectionBoundingBox && isPointInBox(pos, selectionBoundingBox)) {
         isMovingSelection = true;
         dragStartPos = pos;
@@ -384,7 +458,6 @@
         return;
       }
 
-      // 新しい投げなわ選択開始
       clearSelection();
       isDrawing = true;
       lassoPoints = [pos];
@@ -418,7 +491,6 @@
     const pos = getPos(e);
 
     if (isMovingSelection && dragStartPos) {
-      // 選択範囲の平行移動
       const dx = pos.x - dragStartPos.x;
       const dy = pos.y - dragStartPos.y;
 
@@ -480,7 +552,6 @@
     }
   }
 
-  // 線消しゴム
   function eraseStrokeAtPos(pos) {
     const threshold = eraserSize / 2;
     let erased = false;
@@ -545,7 +616,6 @@
     ctx.restore();
   }
 
-  // 選択バウンディングボックスの描画
   function drawSelectionBox() {
     if (!selectionBoundingBox) return;
 
@@ -569,7 +639,6 @@
     drawSelectionBox();
   }
 
-  // 投げなわ選択処理
   function selectStrokesInLasso(polygon) {
     selectedStrokeIndices = [];
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -630,7 +699,6 @@
     clearSelection();
   }
 
-  // 元に戻す (Undo)
   function undo() {
     if (historyStack.length > 0) {
       strokes = historyStack.pop();
@@ -640,7 +708,6 @@
     }
   }
 
-  // 全消去
   function clearCanvas() {
     if (strokes.length === 0) return;
     if (confirm('画面上のすべてを消去しますか？')) {
