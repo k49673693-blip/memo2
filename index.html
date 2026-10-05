@@ -152,10 +152,10 @@
 
   <!-- 太さと色 -->
   <div class="tool-group">
-    <!-- 単押しで切り替え / 長押しでカラーパレット -->
     <div class="color-btn-wrapper" id="color-picker-container">
       <button id="color-toggle-btn" class="color-toggle-btn">
         <span id="color-dot" class="color-dot"></span>
+        <span id="color-label">黒/赤</span>
       </button>
       <input type="color" id="pen-color" value="#000000" onchange="updateCustomColor(this.value)">
     </div>
@@ -187,7 +187,7 @@
   let currentMode = 'pen'; 
   let isDrawing = false;
   
-  let currentColor = '#000000'; // デフォルトは黒
+  let currentColor = '#000000';
   let penSize = 1;
   let eraserSize = 1;
   let hasGrid = true;
@@ -214,7 +214,7 @@
   let touchStartCenter = { x: 0, y: 0 };
   let touchStartOffset = { x: 0, y: 0 };
 
-  // --- 色選択（単押し黒赤切替 / 長押しカラーパレット）の実装 ---
+  // --- 色選択処理 ---
   const colorBtn = document.getElementById('color-toggle-btn');
   const colorDot = document.getElementById('color-dot');
   const colorPickerInput = document.getElementById('pen-color');
@@ -228,34 +228,29 @@
     if (currentMode !== 'pen') setMode('pen');
   }
 
-  // 単押し：黒と赤の交互切替
   function toggleBlackRed() {
     if (currentColor.toLowerCase() === '#000000') {
-      applyColor('#FF2D2D'); // 赤へ
+      applyColor('#FF2D2D');
     } else {
-      applyColor('#000000'); // 黒へ
+      applyColor('#000000');
     }
   }
 
-  // カラーパレットから任意の色が選ばれたとき
   function updateCustomColor(hex) {
     applyColor(hex);
   }
 
-  // 長押し判定イベント
   function startColorPress() {
     isLongPress = false;
     longPressTimer = setTimeout(() => {
       isLongPress = true;
-      // カラーパレットを開く
       colorPickerInput.click();
-    }, 450); // 0.45秒長押しでパレット表示
+    }, 450);
   }
 
   function endColorPress(e) {
     clearTimeout(longPressTimer);
     if (!isLongPress) {
-      // 短押しと判定された場合のみ切り替え実行
       toggleBlackRed();
     }
     isLongPress = false;
@@ -273,6 +268,28 @@
     e.preventDefault();
     endColorPress(e);
   });
+
+  // --- 自動保存・読み込み処理 ---
+  const STORAGE_KEY = 'handwriting_note_data';
+
+  function saveToLocalStorage() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(strokes));
+    } catch (e) {
+      console.error('保存に失敗しました', e);
+    }
+  }
+
+  function loadFromLocalStorage() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        strokes = JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error('読み込みに失敗しました', e);
+    }
+  }
 
   // ----------------------------------------------------
 
@@ -531,6 +548,7 @@
     if (isMovingSelection) {
       isMovingSelection = false;
       dragStartPos = null;
+      saveToLocalStorage(); // 移動完了時に保存
       return;
     }
 
@@ -546,6 +564,7 @@
     } else if (currentStroke) {
       if (currentStroke.points.length > 0) {
         strokes.push(currentStroke);
+        saveToLocalStorage(); // 筆記完了時に保存
       }
       currentStroke = null;
     }
@@ -567,6 +586,7 @@
 
     if (erased) {
       redrawCanvas();
+      saveToLocalStorage(); // 消去完了時に保存
     }
   }
 
@@ -696,6 +716,7 @@
 
     strokes = strokes.filter((_, idx) => !selectedStrokeIndices.includes(idx));
     clearSelection();
+    saveToLocalStorage(); // 囲み消去時に保存
   }
 
   function undo() {
@@ -704,6 +725,7 @@
       clearSelection();
       redrawCanvas();
       updateUndoButton();
+      saveToLocalStorage(); // Undo時に保存
     }
   }
 
@@ -714,9 +736,12 @@
       strokes = [];
       clearSelection();
       redrawCanvas();
+      saveToLocalStorage(); // 全消去時に保存
     }
   }
 
+  // 初期化（保存データの復元と描画）
+  loadFromLocalStorage();
   resizeCanvas();
   updateUndoButton();
 </script>
