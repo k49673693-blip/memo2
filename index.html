@@ -147,7 +147,7 @@
     <button id="tool-pen" class="btn active" onclick="setMode('pen')">✏️ ペン</button>
     <button id="tool-eraser" class="btn" onclick="setMode('eraser')">🧹 部分消しゴム</button>
     <button id="tool-stroke-eraser" class="btn" onclick="setMode('stroke-eraser')">⚡ 線消しゴム</button>
-    <button id="tool-lasso" class="btn" onclick="setMode('lasso')">⭕ 囲んで移動/消去</button>
+    <button id="tool-lasso" class="btn" onclick="setMode('lasso')">⭕ 囲んで移動/変形/消去</button>
   </div>
 
   <!-- 太さと色 -->
@@ -155,13 +155,14 @@
     <div class="color-btn-wrapper" id="color-picker-container">
       <button id="color-toggle-btn" class="color-toggle-btn">
         <span id="color-dot" class="color-dot"></span>
+        <span id="color-label">黒/赤</span>
       </button>
       <input type="color" id="pen-color" value="#000000" onchange="updateCustomColor(this.value)">
     </div>
 
     <span class="size-label" id="size-title">ペンの太さ:</span>
-    <input type="range" id="size-slider" min="1" max="5" value="1" oninput="updateSize()">
-    <span id="size-display" class="size-label">1px</span>
+    <input type="range" id="size-slider" min="1" max="50" value="3" oninput="updateSize()">
+    <span id="size-display" class="size-label">3px</span>
   </div>
 
   <!-- アクション -->
@@ -187,8 +188,8 @@
   let isDrawing = false;
   
   let currentColor = '#000000';
-  let penSize = 1;
-  let eraserSize = 1;
+  let penSize = 3;
+  let eraserSize = 15;
   let hasGrid = true;
 
   // 描画データ & 履歴スタック（Undo対応）
@@ -196,12 +197,17 @@
   let historyStack = [];
   let currentStroke = null;
   
-  // 投げなわ選択・移動用
+  // 投げなわ選択・移動・リサイズ用
   let lassoPoints = [];
   let selectedStrokeIndices = [];
   let isMovingSelection = false;
+  let activeHandle = null; // 'nw', 'ne', 'sw', 'se'
   let dragStartPos = null;
   let selectionBoundingBox = null;
+
+  // 自動スクロール用
+  let autoScrollTimer = null;
+  let currentClientPos = { x: 0, y: 0 };
 
   // ズーム・パン移動変数
   let scale = 1;
@@ -229,7 +235,7 @@
 
   function toggleBlackRed() {
     if (currentColor.toLowerCase() === '#000000') {
-      applyColor('#FF2D2D');
+      applyColor('#ff0000');
     } else {
       applyColor('#000000');
     }
@@ -374,18 +380,18 @@
     redrawCanvas();
   }
 
+  function getClientPos(e) {
+    if (e.touches && e.touches.length > 0) {
+      return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
   function getPos(e) {
     const rect = canvas.getBoundingClientRect();
-    let clientX, clientY;
-    if (e.touches && e.touches.length > 0) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = e.clientX;
-      clientY = e.clientY;
-    }
-    const screenX = clientX - rect.left;
-    const screenY = clientY - rect.top;
+    const client = getClientPos(e);
+    const screenX = client.x - rect.left;
+    const screenY = client.y - rect.top;
 
     return {
       x: (screenX - offsetX) / scale,
@@ -414,9 +420,11 @@
   canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
     if (e.touches.length === 2) {
+      stopAutoScroll();
       isMultiTouch = true;
       isDrawing = false;
       isMovingSelection = false;
+      activeHandle = null;
       currentStroke = null;
       touchStartDist = getDistance(e.touches[0], e.touches[1]);
       touchStartScale = scale;
@@ -464,13 +472,28 @@
   function startDrawing(e) {
     if (isMultiTouch) return;
     const pos = getPos(e);
+    currentClientPos = getClientPos(e);
 
     if (currentMode === 'lasso') {
-      if (selectedStrokeIndices.length > 0 && selectionBoundingBox && isPointInBox(pos, selectionBoundingBox)) {
-        isMovingSelection = true;
-        dragStartPos = pos;
-        saveHistory();
-        return;
+      if (selectedStrokeIndices.length > 0 && selectionBoundingBox) {
+        // ハンドルタップ判定
+        const handle = getTouchedHandle(pos, selectionBoundingBox);
+        if (handle) {
+          activeHandle = handle;
+          dragStartPos = pos;
+          saveHistory();
+          startAutoScrollLoop();
+          return;
+        }
+
+        // 枠内移動判定
+        if (isPointInBox(pos, selectionBoundingBox)) {
+          isMovingSelection = true;
+          dragStartPos = pos;
+          saveHistory();
+          startAutoScrollLoop();
+          return;
+        }
       }
 
       clearSelection();
@@ -504,6 +527,14 @@
   function draw(e) {
     if (isMultiTouch) return;
     const pos = getPos(e);
+    currentClientPos = getClientPos(e);
+
+    if (activeHandle && dragStartPos) {
+      resizeSelection(pos);
+      dragStartPos = pos;
+      redrawCanvas();
+      return;
+    }
 
     if (isMovingSelection && dragStartPos) {
       const dx = pos.x - dragStartPos.x;
@@ -544,10 +575,14 @@
   }
 
   function stopDrawing() {
-    if (isMovingSelection) {
+    stopAutoScroll();
+
+    if (activeHandle || isMovingSelection) {
+      activeHandle = null;
       isMovingSelection = false;
       dragStartPos = null;
-      saveToLocalStorage(); // 移動完了時に保存
+      recalculateBoundingBox();
+      saveToLocalStorage();
       return;
     }
 
@@ -563,10 +598,144 @@
     } else if (currentStroke) {
       if (currentStroke.points.length > 0) {
         strokes.push(currentStroke);
-        saveToLocalStorage(); // 筆記完了時に保存
+        saveToLocalStorage();
       }
       currentStroke = null;
     }
+  }
+
+  // --- 自動スクロール（端に到達したときの画面移動） ---
+  function startAutoScrollLoop() {
+    if (autoScrollTimer) return;
+    autoScrollTimer = setInterval(() => {
+      const rect = canvas.getBoundingClientRect();
+      const margin = 40; // エッジ判定（px）
+      const speed = 12; // 移動速度
+
+      let dx = 0;
+      let dy = 0;
+
+      if (currentClientPos.x < rect.left + margin) dx = speed;
+      else if (currentClientPos.x > rect.right - margin) dx = -speed;
+
+      if (currentClientPos.y < rect.top + margin) dy = speed;
+      else if (currentClientPos.y > rect.bottom - margin) dy = -speed;
+
+      if (dx !== 0 || dy !== 0) {
+        offsetX += dx;
+        offsetY += dy;
+        updateGridSize();
+
+        // 画面移動に伴い現在のキャンバス座標も更新して移動/リサイズを適用
+        const canvasPos = {
+          x: (currentClientPos.x - rect.left - offsetX) / scale,
+          y: (currentClientPos.y - rect.top - offsetY) / scale
+        };
+
+        if (activeHandle && dragStartPos) {
+          resizeSelection(canvasPos);
+          dragStartPos = canvasPos;
+        } else if (isMovingSelection && dragStartPos) {
+          const mDx = canvasPos.x - dragStartPos.x;
+          const mDy = canvasPos.y - dragStartPos.y;
+
+          selectedStrokeIndices.forEach(idx => {
+            strokes[idx].points.forEach(pt => { pt.x += mDx; pt.y += mDy; });
+          });
+          if (selectionBoundingBox) {
+            selectionBoundingBox.minX += mDx; selectionBoundingBox.maxX += mDx;
+            selectionBoundingBox.minY += mDy; selectionBoundingBox.maxY += mDy;
+          }
+          dragStartPos = canvasPos;
+        }
+
+        redrawCanvas();
+      }
+    }, 20);
+  }
+
+  function stopAutoScroll() {
+    if (autoScrollTimer) {
+      clearInterval(autoScrollTimer);
+      autoScrollTimer = null;
+    }
+  }
+// --- 拡大・縮小（リサイズ）処理 ---
+  function resizeSelection(currentPos) {
+    if (!selectionBoundingBox) return;
+    const box = selectionBoundingBox;
+
+    let anchorX, anchorY;
+    let oldWidth = box.maxX - box.minX;
+    let oldHeight = box.maxY - box.minY;
+
+    if (oldWidth <= 0 || oldHeight <= 0) return;
+
+    if (activeHandle === 'se') { anchorX = box.minX; anchorY = box.minY; }
+    else if (activeHandle === 'sw') { anchorX = box.maxX; anchorY = box.minY; }
+    else if (activeHandle === 'ne') { anchorX = box.minX; anchorY = box.maxY; }
+    else if (activeHandle === 'nw') { anchorX = box.maxX; anchorY = box.maxY; }
+
+    const newWidth = Math.abs(currentPos.x - anchorX);
+    const newHeight = Math.abs(currentPos.y - anchorY);
+
+    const scaleX = newWidth / oldWidth;
+    const scaleY = newHeight / oldHeight;
+
+    if (scaleX === 0 || scaleY === 0) return;
+
+    selectedStrokeIndices.forEach(idx => {
+      strokes[idx].points.forEach(pt => {
+        pt.x = anchorX + (pt.x - anchorX) * scaleX;
+        pt.y = anchorY + (pt.y - anchorY) * scaleY;
+      });
+    });
+
+    recalculateBoundingBox();
+  }
+
+  function recalculateBoundingBox() {
+    if (selectedStrokeIndices.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    selectedStrokeIndices.forEach(idx => {
+      strokes[idx].points.forEach(pt => {
+        if (pt.x < minX) minX = pt.x;
+        if (pt.x > maxX) maxX = pt.x;
+        if (pt.y < minY) minY = pt.y;
+        if (pt.y > maxY) maxY = pt.y;
+      });
+    });
+
+    selectionBoundingBox = { minX, minY, maxX, maxY };
+  }
+
+  function getTouchedHandle(pos, box) {
+    const pad = 10 / scale;
+    const radius = 16 / scale; // ハンドル判定感度
+
+    const padBox = {
+      minX: box.minX - pad,
+      minY: box.minY - pad,
+      maxX: box.maxX + pad,
+      maxY: box.maxY + pad
+    };
+
+    const handles = [
+      { name: 'nw', x: padBox.minX, y: padBox.minY },
+      { name: 'ne', x: padBox.maxX, y: padBox.minY },
+      { name: 'sw', x: padBox.minX, y: padBox.maxY },
+      { name: 'se', x: padBox.maxX, y: padBox.maxY }
+    ];
+
+    for (let h of handles) {
+      const dx = pos.x - h.x;
+      const dy = pos.y - h.y;
+      if (Math.sqrt(dx * dx + dy * dy) <= radius) {
+        return h.name;
+      }
+    }
+    return null;
   }
 
   function eraseStrokeAtPos(pos) {
@@ -585,7 +754,7 @@
 
     if (erased) {
       redrawCanvas();
-      saveToLocalStorage(); // 消去完了時に保存
+      saveToLocalStorage();
     }
   }
 
@@ -639,15 +808,42 @@
 
     ctx.save();
     ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+    
+    const pad = 10 / scale;
+    const box = selectionBoundingBox;
+    const minX = box.minX - pad;
+    const minY = box.minY - pad;
+    const maxX = box.maxX + pad;
+    const maxY = box.maxY + pad;
+
+    // 選択点線枠
     ctx.beginPath();
     ctx.strokeStyle = '#007aff';
     ctx.lineWidth = 2 / scale;
     ctx.setLineDash([4 / scale, 4 / scale]);
-
-    const pad = 8 / scale;
-    const box = selectionBoundingBox;
-    ctx.rect(box.minX - pad, box.minY - pad, (box.maxX - box.minX) + pad * 2, (box.maxY - box.minY) + pad * 2);
+    ctx.rect(minX, minY, maxX - minX, maxY - minY);
     ctx.stroke();
+
+    // 四隅のハンドル（○）描画
+    const handleRadius = 6 / scale;
+    const handles = [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: minX, y: maxY },
+      { x: maxX, y: maxY }
+    ];
+
+    ctx.setLineDash([]);
+    handles.forEach(h => {
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, handleRadius, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#007aff';
+      ctx.lineWidth = 2 / scale;
+      ctx.stroke();
+    });
+
     ctx.restore();
   }
 
@@ -659,23 +855,16 @@
 
   function selectStrokesInLasso(polygon) {
     selectedStrokeIndices = [];
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
 
     strokes.forEach((stroke, idx) => {
       const isInside = stroke.points.some(pt => isPointInPolygon(pt, polygon));
       if (isInside) {
         selectedStrokeIndices.push(idx);
-        stroke.points.forEach(pt => {
-          if (pt.x < minX) minX = pt.x;
-          if (pt.x > maxX) maxX = pt.x;
-          if (pt.y < minY) minY = pt.y;
-          if (pt.y > maxY) maxY = pt.y;
-        });
       }
     });
 
     if (selectedStrokeIndices.length > 0) {
-      selectionBoundingBox = { minX, minY, maxX, maxY };
+      recalculateBoundingBox();
       document.getElementById('btn-delete-selected').style.display = 'inline-flex';
     } else {
       clearSelection();
@@ -697,7 +886,7 @@
   }
 
   function isPointInBox(pt, box) {
-    const pad = 12 / scale;
+    const pad = 10 / scale;
     return pt.x >= box.minX - pad && pt.x <= box.maxX + pad &&
            pt.y >= box.minY - pad && pt.y <= box.maxY + pad;
   }
@@ -715,7 +904,7 @@
 
     strokes = strokes.filter((_, idx) => !selectedStrokeIndices.includes(idx));
     clearSelection();
-    saveToLocalStorage(); // 囲み消去時に保存
+    saveToLocalStorage();
   }
 
   function undo() {
@@ -724,7 +913,7 @@
       clearSelection();
       redrawCanvas();
       updateUndoButton();
-      saveToLocalStorage(); // Undo時に保存
+      saveToLocalStorage();
     }
   }
 
@@ -735,7 +924,7 @@
       strokes = [];
       clearSelection();
       redrawCanvas();
-      saveToLocalStorage(); // 全消去時に保存
+      saveToLocalStorage();
     }
   }
 
