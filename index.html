@@ -797,36 +797,6 @@
     for (let i = 1; i < lassoPoints.length; i++) {
       ctx.lineTo(lassoPoints[i].x, lassoPoints[i].y);
     }
-    ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  function drawSelectionBox() {
-    if (!selectionBoundingBox) return;
-
-    ctx.save();
-    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
-    
-    const pad = 10 / scale;
-    const box = selectionBoundingBox;
-    const minX = box.minX - pad;
-    const minY = box.minY - pad;
-    const maxX = box.maxX + pad;
-    const maxY = box.maxY + pad;
-
-    // 選択点線枠
-    ctx.beginPath();
-    ctx.strokeStyle = '#007aff';
-    ctx.lineWidth = 2 / scale;
-    ctx.setLineDash([4 / scale, 4 / scale]);
-    ctx.rect(minX, minY, maxX - minX, maxY - minY);
-    ctx.stroke();
-
-    // 四隅のハンドル（○）描画
-    const handleRadius = 6 / scale;
-    const handles = [
-      { x: minX, y: minY },
   // --- 縦横比固定の拡大・縮小（リサイズ）処理 ---
   function resizeSelection(currentPos) {
     if (!selectionBoundingBox) return;
