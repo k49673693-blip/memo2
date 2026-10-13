@@ -234,7 +234,7 @@
 
   function toggleBlackRed() {
     if (currentColor.toLowerCase() === '#000000') {
-      applyColor('#ff0000');
+      applyColor('#FF2D2D');
     } else {
       applyColor('#000000');
     }
@@ -475,7 +475,6 @@
 
     if (currentMode === 'lasso') {
       if (selectedStrokeIndices.length > 0 && selectionBoundingBox) {
-        // ハンドルタップ判定
         const handle = getTouchedHandle(pos, selectionBoundingBox);
         if (handle) {
           activeHandle = handle;
@@ -485,7 +484,6 @@
           return;
         }
 
-        // 枠内移動判定
         if (isPointInBox(pos, selectionBoundingBox)) {
           isMovingSelection = true;
           dragStartPos = pos;
@@ -603,13 +601,12 @@
     }
   }
 
-  // --- 自動スクロール（端に到達したときの画面移動） ---
   function startAutoScrollLoop() {
     if (autoScrollTimer) return;
     autoScrollTimer = setInterval(() => {
       const rect = canvas.getBoundingClientRect();
-      const margin = 40; // エッジ判定（px）
-      const speed = 12; // 移動速度
+      const margin = 40;
+      const speed = 12;
 
       let dx = 0;
       let dy = 0;
@@ -625,7 +622,6 @@
         offsetY += dy;
         updateGridSize();
 
-        // 画面移動に伴い現在のキャンバス座標も更新して移動/リサイズを適用
         const canvasPos = {
           x: (currentClientPos.x - rect.left - offsetX) / scale,
           y: (currentClientPos.y - rect.top - offsetY) / scale
@@ -658,8 +654,8 @@
       clearInterval(autoScrollTimer);
       autoScrollTimer = null;
     }
-  } 
-  // --- 縦横比固定の拡大・縮小（リサイズ）処理 ---
+  }
+
   function resizeSelection(currentPos) {
     if (!selectionBoundingBox) return;
     const box = selectionBoundingBox;
@@ -677,8 +673,6 @@
 
     const rawScaleX = Math.abs(currentPos.x - anchorX) / oldWidth;
     const rawScaleY = Math.abs(currentPos.y - anchorY) / oldHeight;
-
-    // 縦横比（アスペクト比）を保つため、変形の大きい方の比率に固定する
     const uniformScale = Math.max(rawScaleX, rawScaleY);
 
     if (uniformScale === 0) return;
@@ -711,7 +705,7 @@
 
   function getTouchedHandle(pos, box) {
     const pad = 10 / scale;
-    const radius = 16 / scale; // ハンドル判定感度
+    const radius = 16 / scale;
 
     const padBox = {
       minX: box.minX - pad,
@@ -757,6 +751,7 @@
     }
   }
 
+  // --- ベジェ曲線を使用したなめらかな描画処理 ---
   function drawSingleStroke(stroke) {
     if (!stroke || stroke.points.length === 0) return;
 
@@ -776,12 +771,26 @@
     }
 
     const pts = stroke.points;
-    ctx.moveTo(pts[0].x, pts[0].y);
-
-    for (let i = 1; i < pts.length; i++) {
-      ctx.lineTo(pts[i].x, pts[i].y);
+    if (pts.length === 1) {
+      // 点の場合
+      ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2);
+      ctx.fillStyle = stroke.type === 'eraser' ? '#000000' : stroke.color;
+      ctx.fill();
+    } else {
+      ctx.moveTo(pts[0].x, pts[0].y);
+      // 2点目以降は二次ベジェ曲線（quadraticCurveTo）でなめらかに繋ぐ
+      for (let i = 1; i < pts.length; i++) {
+        let xc = (pts[i].x + pts[i - 1].x) / 2;
+        let yc = (pts[i].y + pts[i - 1].y) / 2;
+        ctx.quadraticCurveTo(pts[i - 1].x, pts[i - 1].y, xc, yc);
+      }
+      // 最後の点まで描画
+      if (pts.length > 1) {
+        ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
+
     ctx.restore();
   }
 
@@ -815,7 +824,6 @@
     const maxX = box.maxX + pad;
     const maxY = box.maxY + pad;
 
-    // 選択点線枠
     ctx.beginPath();
     ctx.strokeStyle = '#007aff';
     ctx.lineWidth = 2 / scale;
@@ -823,7 +831,6 @@
     ctx.rect(minX, minY, maxX - minX, maxY - minY);
     ctx.stroke();
 
-    // 四隅のハンドル（○）描画
     const handleRadius = 6 / scale;
     const handles = [
       { x: minX, y: minY },
@@ -925,7 +932,8 @@
       redrawCanvas();
       saveToLocalStorage();
     }
-        }
+  }
+
   // 初期化（保存データの復元と描画）
   loadFromLocalStorage();
   resizeCanvas();
