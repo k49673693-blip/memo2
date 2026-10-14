@@ -751,7 +751,7 @@
     }
   }
 
-// --- 【超高速・文字化けなし】高精度直線結合方式による描画処理 ---
+// --- 【高速・変形なし・滑らかなサブセグメント接続】描画処理 ---
   function drawSingleStroke(stroke) {
     if (!stroke || stroke.points.length === 0) return;
 
@@ -775,11 +775,22 @@
       ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2);
       ctx.fillStyle = stroke.type === 'eraser' ? '#000000' : stroke.color;
       ctx.fill();
+    } else if (pts.length === 2) {
+      ctx.moveTo(pts[0].x, pts[0].y);
+      ctx.lineTo(pts[1].x, pts[1].y);
+      ctx.stroke();
     } else {
+      // 座標間を安全な中間点（前後の点の中点）で繋ぐことで、
+      // 文字の形を狂わせずにジャギー（カクカク）だけを消去する方式
       ctx.moveTo(pts[0].x, pts[0].y);
       for (let i = 1; i < pts.length; i++) {
-        ctx.lineTo(pts[i].x, pts[i].y);
+        let prev = pts[i - 1];
+        let curr = pts[i];
+        let midX = (prev.x + curr.x) / 2;
+        let midY = (prev.y + curr.y) / 2;
+        ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
       }
+      ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
       ctx.stroke();
     }
 
