@@ -751,7 +751,7 @@
     }
   }
 
-// --- 文字の化け（過剰な丸まり）を防ぐスマートな曲線描画処理 ---
+// --- 【超高速・文字化けなし】高精度直線結合方式による描画処理 ---
   function drawSingleStroke(stroke) {
     if (!stroke || stroke.points.length === 0) return;
 
@@ -775,37 +775,10 @@
       ctx.arc(pts[0].x, pts[0].y, stroke.size / 2, 0, Math.PI * 2);
       ctx.fillStyle = stroke.type === 'eraser' ? '#000000' : stroke.color;
       ctx.fill();
-    } else if (pts.length === 2) {
-      // 2点間の場合は直接直線で結ぶ
-      ctx.moveTo(pts[0].x, pts[0].y);
-      ctx.lineTo(pts[1].x, pts[1].y);
-      ctx.stroke();
     } else {
       ctx.moveTo(pts[0].x, pts[0].y);
-      // 角（まがりかど）で線が変にねじれるのを防ぐため、距離が短い部分や急な方向転換では直線的に繋ぐ
-      for (let i = 1; i < pts.length - 1; i++) {
-        let p0 = pts[i - 1];
-        let p1 = pts[i];
-        let p2 = pts[i + 1];
-
-        // 3点間の角度や距離を計算して直線に近いべきか判定
-        let dist1 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-        let dist2 = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-
-        if (dist1 < 2 || dist2 < 2) {
-          // 点が近すぎる場合は直線補間
-          ctx.lineTo(p1.x, p1.y);
-        } else {
-          let xc = (p1.x + p2.x) / 2;
-          let yc = (p1.y + p2.y) / 2;
-          ctx.quadraticCurveTo(p1.x, p1.y, xc, yc);
-        }
-      }
-      // 最後の点へ接続
-      if (pts.length > 1) {
-        let last = pts[pts.length - 1];
-        let prev = pts[pts.length - 2];
-        ctx.quadraticCurveTo(prev.x, prev.y, last.x, last.y);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i].x, pts[i].y);
       }
       ctx.stroke();
     }
