@@ -222,9 +222,8 @@
   let pendingPoints = [];
   let animationFrameId = null;
 
-  // --- 自動保存・読み込み処理（旧キーも検索して復元） ---
-  const STORAGE_KEY = 'handwriting_note_data_v2';
-  const OLD_STORAGE_KEY = 'handwriting_note_data';
+  // --- 自動保存・読み込み処理（キーを一つに統一） ---
+  const STORAGE_KEY = 'handwriting_note_data';
 
   function saveToLocalStorage() {
     try {
@@ -236,11 +235,7 @@
 
   function loadFromLocalStorage() {
     try {
-      let saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) {
-        // 新キーにない場合は旧キーからも探す
-        saved = localStorage.getItem(OLD_STORAGE_KEY);
-      }
+      const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -998,7 +993,7 @@
     }
   }
 
-  // --- 初期化処理（データの読み込みとキャンバスのセットアップ） ---
+  // --- 初期化処理 ---
   loadFromLocalStorage();
   resizeCanvas();
   updateUndoButton();
