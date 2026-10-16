@@ -217,7 +217,11 @@
   let offsetY = 0;
   let isMultiTouch = false;
 
-  // --- 色選択処理（単押し黒赤切替 / 長押しカラーパレット） ---
+  // 高頻度座標バッファ（アニメーションフレーム同期用）
+  let pendingPoints = [];
+  let animationFrameId = null;
+
+  // --- 色選択処理 ---
   const colorBtn = document.getElementById('color-toggle-btn');
   const colorDot = document.getElementById('color-dot');
   const colorPickerInput = document.getElementById('pen-color');
@@ -243,7 +247,7 @@
     applyColor(hex);
   }
 
-  function startColorPress(e) {
+  function startColorPress() {
     isLongPress = false;
     longPressTimer = setTimeout(() => {
       isLongPress = true;
@@ -263,7 +267,7 @@
   colorBtn.addEventListener('mouseup', endColorPress);
   colorBtn.addEventListener('mouseleave', () => clearTimeout(longPressTimer));
 
-  colorBtn.addEventListener('touchstart', (e) => {
+  colorBtn.addEventListener('touchstart', () => {
     startColorPress();
   }, { passive: true });
   colorBtn.addEventListener('touchend', (e) => {
@@ -400,6 +404,25 @@
     };
   }
 
+  // --- 超高頻度描画ループ (requestAnimationFrame) ---
+  function startRenderLoop() {
+    if (animationFrameId) return;
+    function renderStep() {
+      if (pendingPoints.length > 0 && currentStroke) {
+        pendingPoints.forEach(p => currentStroke.points.push(p));
+        pendingPoints = [];
+        redrawCanvas();
+        drawSingleStroke(currentStroke);
+      }
+      if (isDrawing || isMovingSelection || activeHandle) {
+        animationFrameId = requestAnimationFrame(renderStep);
+      } else {
+        animationFrameId = null;
+      }
+    }
+    animationFrameId = requestAnimationFrame(renderStep);
+  }
+
   // --- Pointer Events による高精度・高頻度タッチ対応 ---
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch' && e.isPrimary === false) return;
@@ -443,6 +466,7 @@
         size: eraserSize,
         points: [pos]
       };
+      startRenderLoop();
     } else {
       isDrawing = true;
       saveHistory();
@@ -452,6 +476,7 @@
         size: penSize,
         points: [pos]
       };
+      startRenderLoop();
     }
   });
 
@@ -500,14 +525,12 @@
     } else if (currentMode === 'stroke-eraser') {
       eraseStrokeAtPos(pos);
     } else if (currentStroke) {
+      // getCoalescedEvents を通して中間の隠れ座標を極限まで収集
       const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
       events.forEach(ev => {
         const p = getPosFromClient(ev.clientX, ev.clientY);
-        currentStroke.points.push(p);
+        pendingPoints.push(p);
       });
-      
-      redrawCanvas();
-      drawSingleStroke(currentStroke);
     }
   });
 
@@ -525,6 +548,12 @@
 
     if (!isDrawing) return;
     isDrawing = false;
+
+    // 残りのバッファを強制フラッシュ
+    if (pendingPoints.length > 0 && currentStroke) {
+      pendingPoints.forEach(p => currentStroke.points.push(p));
+      pendingPoints = [];
+    }
 
     if (currentMode === 'lasso') {
       if (lassoPoints.length > 2) {
@@ -697,7 +726,7 @@
     selectionBoundingBox = { minX, minY, maxX, maxY };
   }
 
-  function getTouchedHandle(pos, box) {
+   function getTouchedHandle(pos, box) {
     const pad = 10 / scale;
     const radius = 16 / scale;
 
