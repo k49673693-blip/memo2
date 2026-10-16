@@ -222,8 +222,9 @@
   let pendingPoints = [];
   let animationFrameId = null;
 
-  // --- 自動保存・読み込み処理（堅牢化） ---
+  // --- 自動保存・読み込み処理（旧キーも検索して復元） ---
   const STORAGE_KEY = 'handwriting_note_data_v2';
+  const OLD_STORAGE_KEY = 'handwriting_note_data';
 
   function saveToLocalStorage() {
     try {
@@ -235,7 +236,11 @@
 
   function loadFromLocalStorage() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      let saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) {
+        // 新キーにない場合は旧キーからも探す
+        saved = localStorage.getItem(OLD_STORAGE_KEY);
+      }
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
@@ -246,9 +251,6 @@
       console.error('読み込みに失敗しました', e);
     }
   }
-
-  // --- 初期化処理（データ読み込みを最優先） ---
-  loadFromLocalStorage();
 
   // --- 色選択処理（黒/赤切り替え & 長押しピッカー） ---
   const colorBtn = document.getElementById('color-toggle-btn');
@@ -996,7 +998,8 @@
     }
   }
 
-  // --- 初期化時にサイズ設定と描画を確実に実行 ---
+  // --- 初期化処理（データの読み込みとキャンバスのセットアップ） ---
+  loadFromLocalStorage();
   resizeCanvas();
   updateUndoButton();
 </script>
