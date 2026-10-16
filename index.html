@@ -217,7 +217,7 @@
   let offsetY = 0;
   let isMultiTouch = false;
 
-  // --- 色選択処理 ---
+  // --- 色選択処理（単押し黒赤切替 / 長押しカラーパレット） ---
   const colorBtn = document.getElementById('color-toggle-btn');
   const colorDot = document.getElementById('color-dot');
   const colorPickerInput = document.getElementById('pen-color');
@@ -243,7 +243,7 @@
     applyColor(hex);
   }
 
-  function startColorPress() {
+  function startColorPress(e) {
     isLongPress = false;
     longPressTimer = setTimeout(() => {
       isLongPress = true;
@@ -264,13 +264,11 @@
   colorBtn.addEventListener('mouseleave', () => clearTimeout(longPressTimer));
 
   colorBtn.addEventListener('touchstart', (e) => {
-    e.preventDefault();
     startColorPress();
-  });
+  }, { passive: true });
   colorBtn.addEventListener('touchend', (e) => {
-    e.preventDefault();
     endColorPress(e);
-  });
+  }, { passive: true });
 
   // --- 自動保存・読み込み処理 ---
   const STORAGE_KEY = 'handwriting_note_data';
