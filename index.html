@@ -16,7 +16,9 @@
 <link rel="manifest" href="manifest.json">
 <script>
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js');
+    navigator.serviceWorker.register('sw.js').catch(function(err) {
+      console.log('ServiceWorker registration failed: ', err);
+    });
   }
 </script>
 
@@ -155,13 +157,14 @@
     <div class="color-btn-wrapper" id="color-picker-container">
       <button id="color-toggle-btn" class="color-toggle-btn">
         <span id="color-dot" class="color-dot"></span>
+        <span id="color-label">黒/赤</span>
       </button>
       <input type="color" id="pen-color" value="#000000" onchange="updateCustomColor(this.value)">
     </div>
 
     <span class="size-label" id="size-title">ペンの太さ:</span>
-    <input type="range" id="size-slider" min="1" max="5" value="1" oninput="updateSize()">
-    <span id="size-display" class="size-label">1px</span>
+    <input type="range" id="size-slider" min="1" max="50" value="3" oninput="updateSize()">
+    <span id="size-display" class="size-label">3px</span>
   </div>
 
   <!-- アクション -->
@@ -187,8 +190,8 @@
   let isDrawing = false;
   
   let currentColor = '#000000';
-  let penSize = 1;
-  let eraserSize = 1;
+  let penSize = 3;
+  let eraserSize = 15;
   let hasGrid = true;
 
   // 描画データ & 履歴スタック（Undo対応）
@@ -200,7 +203,7 @@
   let lassoPoints = [];
   let selectedStrokeIndices = [];
   let isMovingSelection = false;
-  let activeHandle = null; // 'nw', 'ne', 'sw', 'se'
+  let activeHandle = null; 
   let dragStartPos = null;
   let selectionBoundingBox = null;
 
@@ -213,10 +216,6 @@
   let offsetX = 0;
   let offsetY = 0;
   let isMultiTouch = false;
-  let touchStartDist = 0;
-  let touchStartScale = 1;
-  let touchStartCenter = { x: 0, y: 0 };
-  let touchStartOffset = { x: 0, y: 0 };
 
   // --- 色選択処理 ---
   const colorBtn = document.getElementById('color-toggle-btn');
@@ -234,7 +233,7 @@
 
   function toggleBlackRed() {
     if (currentColor.toLowerCase() === '#000000') {
-      applyColor('#ff2D2D');
+      applyColor('#ff0000');
     } else {
       applyColor('#000000');
     }
@@ -405,7 +404,6 @@
 
   // --- Pointer Events による高精度・高頻度タッチ対応 ---
   canvas.addEventListener('pointerdown', (e) => {
-    // 2本指以上の場合はピンチズームへ譲る
     if (e.pointerType === 'touch' && e.isPrimary === false) return;
     
     const pos = getPosFromClient(e.clientX, e.clientY);
@@ -504,7 +502,6 @@
     } else if (currentMode === 'stroke-eraser') {
       eraseStrokeAtPos(pos);
     } else if (currentStroke) {
-      // getCoalescedEvents() を使って隠された中間座標を一網打尽にし、カクつきを完全になくす
       const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
       events.forEach(ev => {
         const p = getPosFromClient(ev.clientX, ev.clientY);
@@ -750,7 +747,7 @@
     }
   }
 
-  // --- 高精度・滑らかな描画処理 ---
+  // --- 描画処理 ---
   function drawSingleStroke(stroke) {
     if (!stroke || stroke.points.length === 0) return;
 
@@ -930,7 +927,7 @@
     }
   }
 
-  // 初期化（保存データの復元と描画）
+  // 初期化
   loadFromLocalStorage();
   resizeCanvas();
   updateUndoButton();
