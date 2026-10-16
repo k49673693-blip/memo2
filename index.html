@@ -134,6 +134,7 @@
     top: 0;
     left: 0;
     touch-action: none;
+    background: transparent;
   }
   .grid-background {
     background-image: linear-gradient(to right, #e8e8e8 1px, transparent 1px),
@@ -183,7 +184,7 @@
 
 <script>
   const canvas = document.getElementById('paintCanvas');
-  const ctx = canvas.getContext('2d', { alpha: false }); // 高速化設定
+  const ctx = canvas.getContext('2d'); // 安定した通常のコンテキストに戻しました
   const container = document.getElementById('canvas-container');
 
   let currentMode = 'pen'; 
@@ -404,12 +405,11 @@
     };
   }
 
-  // --- 超高速・差分描画ループ (requestAnimationFrame) ---
+  // --- 高速・差分描画ループ (requestAnimationFrame) ---
   function startRenderLoop() {
     if (animationFrameId) return;
     function renderStep() {
       if (pendingPoints.length > 0 && currentStroke) {
-        // 新しい点のみを追加して、その部分だけを局所的に描画（差分描画により全再描画のラグを排除）
         const pts = currentStroke.points;
         const startIdx = pts.length;
         pendingPoints.forEach(p => pts.push(p));
@@ -602,7 +602,6 @@
         saveToLocalStorage();
       }
       currentStroke = null;
-      // 描き終わりに全体を再描画して綺麗に確定
       redrawCanvas();
     }
   }
