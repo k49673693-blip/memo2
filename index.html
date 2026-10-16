@@ -156,15 +156,16 @@
   <!-- 太さと色 -->
   <div class="tool-group">
     <div class="color-btn-wrapper" id="color-picker-container">
-      <button id="color-toggle-btn" class="color-toggle-btn">
+      <button id="color-toggle-btn" class="color-toggle-btn" type="button">
         <span id="color-dot" class="color-dot"></span>
+        <span id="color-label">黒/赤</span>
       </button>
       <input type="color" id="pen-color" value="#000000" onchange="updateCustomColor(this.value)">
     </div>
 
     <span class="size-label" id="size-title">ペンの太さ:</span>
-    <input type="range" id="size-slider" min="1" max="5" value="1" oninput="updateSize()">
-    <span id="size-display" class="size-label">1px</span>
+    <input type="range" id="size-slider" min="1" max="50" value="3" oninput="updateSize()">
+    <span id="size-display" class="size-label">3px</span>
   </div>
 
   <!-- アクション -->
@@ -183,15 +184,15 @@
 
 <script>
   const canvas = document.getElementById('paintCanvas');
-  const ctx = canvas.getContext('2d'); // 安定した通常のコンテキストに戻しました
+  const ctx = canvas.getContext('2d');
   const container = document.getElementById('canvas-container');
 
   let currentMode = 'pen'; 
   let isDrawing = false;
   
   let currentColor = '#000000';
-  let penSize = 1;
-  let eraserSize = 1;
+  let penSize = 3;
+  let eraserSize = 15;
   let hasGrid = true;
 
   // 描画データ & 履歴スタック（Undo対応）
@@ -221,7 +222,7 @@
   let pendingPoints = [];
   let animationFrameId = null;
 
-  // --- 色選択処理 ---
+  // --- 色選択処理（黒/赤切り替え & 長押しピッカー） ---
   const colorBtn = document.getElementById('color-toggle-btn');
   const colorDot = document.getElementById('color-dot');
   const colorPickerInput = document.getElementById('pen-color');
@@ -237,7 +238,7 @@
 
   function toggleBlackRed() {
     if (currentColor.toLowerCase() === '#000000') {
-      applyColor('#ff2D2D');
+      applyColor('#ff0000');
     } else {
       applyColor('#000000');
     }
@@ -247,7 +248,7 @@
     applyColor(hex);
   }
 
-  function startColorPress() {
+  function startColorPress(e) {
     isLongPress = false;
     longPressTimer = setTimeout(() => {
       isLongPress = true;
@@ -267,7 +268,7 @@
   colorBtn.addEventListener('mouseup', endColorPress);
   colorBtn.addEventListener('mouseleave', () => clearTimeout(longPressTimer));
 
-  colorBtn.addEventListener('touchstart', () => {
+  colorBtn.addEventListener('touchstart', (e) => {
     startColorPress();
   }, { passive: true });
   colorBtn.addEventListener('touchend', (e) => {
@@ -577,7 +578,7 @@
       isMovingSelection = false;
       dragStartPos = null;
       recalculateBoundingBox();
-      saveToLocalStorage();
+      saveToLocalStorage(); // 変形・移動後も確実に保存
       return;
     }
 
@@ -598,7 +599,7 @@
     } else if (currentStroke) {
       if (currentStroke.points.length > 0) {
         strokes.push(currentStroke);
-        saveToLocalStorage();
+        saveToLocalStorage(); // 描画完了時に確実に保存
       }
       currentStroke = null;
       redrawCanvas();
@@ -805,7 +806,7 @@
 
     if (erased) {
       redrawCanvas();
-      saveToLocalStorage();
+      saveToLocalStorage(); // 消去時も確実に保存
     }
   }
 
@@ -965,7 +966,7 @@
 
     strokes = strokes.filter((_, idx) => !selectedStrokeIndices.includes(idx));
     clearSelection();
-    saveToLocalStorage();
+    saveToLocalStorage(); // 選択範囲削除時も確実に保存
   }
 
   function undo() {
@@ -974,7 +975,7 @@
       clearSelection();
       redrawCanvas();
       updateUndoButton();
-      saveToLocalStorage();
+      saveToLocalStorage(); // アンドゥ時も確実に保存
     }
   }
 
@@ -985,7 +986,7 @@
       strokes = [];
       clearSelection();
       redrawCanvas();
-      saveToLocalStorage();
+      saveToLocalStorage(); // 全消去時も確実に保存
     }
   }
 
