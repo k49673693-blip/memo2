@@ -222,6 +222,34 @@
   let pendingPoints = [];
   let animationFrameId = null;
 
+  // --- 自動保存・読み込み処理（堅牢化） ---
+  const STORAGE_KEY = 'handwriting_note_data_v2';
+
+  function saveToLocalStorage() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(strokes));
+    } catch (e) {
+      console.error('保存に失敗しました', e);
+    }
+  }
+
+  function loadFromLocalStorage() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          strokes = parsed;
+        }
+      }
+    } catch (e) {
+      console.error('読み込みに失敗しました', e);
+    }
+  }
+
+  // --- 初期化処理（データ読み込みを最優先） ---
+  loadFromLocalStorage();
+
   // --- 色選択処理（黒/赤切り替え & 長押しピッカー） ---
   const colorBtn = document.getElementById('color-toggle-btn');
   const colorDot = document.getElementById('color-dot');
@@ -274,28 +302,6 @@
   colorBtn.addEventListener('touchend', (e) => {
     endColorPress(e);
   }, { passive: true });
-
-  // --- 自動保存・読み込み処理 ---
-  const STORAGE_KEY = 'handwriting_note_data';
-
-  function saveToLocalStorage() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(strokes));
-    } catch (e) {
-      console.error('保存に失敗しました', e);
-    }
-  }
-
-  function loadFromLocalStorage() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        strokes = JSON.parse(saved);
-      }
-    } catch (e) {
-      console.error('読み込みに失敗しました', e);
-    }
-  }
 
   // ----------------------------------------------------
 
@@ -578,7 +584,7 @@
       isMovingSelection = false;
       dragStartPos = null;
       recalculateBoundingBox();
-      saveToLocalStorage(); // 変形・移動後も確実に保存
+      saveToLocalStorage();
       return;
     }
 
@@ -599,7 +605,7 @@
     } else if (currentStroke) {
       if (currentStroke.points.length > 0) {
         strokes.push(currentStroke);
-        saveToLocalStorage(); // 描画完了時に確実に保存
+        saveToLocalStorage();
       }
       currentStroke = null;
       redrawCanvas();
@@ -806,7 +812,7 @@
 
     if (erased) {
       redrawCanvas();
-      saveToLocalStorage(); // 消去時も確実に保存
+      saveToLocalStorage();
     }
   }
 
@@ -966,7 +972,7 @@
 
     strokes = strokes.filter((_, idx) => !selectedStrokeIndices.includes(idx));
     clearSelection();
-    saveToLocalStorage(); // 選択範囲削除時も確実に保存
+    saveToLocalStorage();
   }
 
   function undo() {
@@ -975,7 +981,7 @@
       clearSelection();
       redrawCanvas();
       updateUndoButton();
-      saveToLocalStorage(); // アンドゥ時も確実に保存
+      saveToLocalStorage();
     }
   }
 
@@ -986,12 +992,11 @@
       strokes = [];
       clearSelection();
       redrawCanvas();
-      saveToLocalStorage(); // 全消去時も確実に保存
+      saveToLocalStorage();
     }
   }
 
-  // 初期化
-  loadFromLocalStorage();
+  // --- 初期化時にサイズ設定と描画を確実に実行 ---
   resizeCanvas();
   updateUndoButton();
 </script>
