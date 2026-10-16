@@ -183,7 +183,7 @@
 
 <script>
   const canvas = document.getElementById('paintCanvas');
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { alpha: false }); // 高速化設定
   const container = document.getElementById('canvas-container');
 
   let currentMode = 'pen'; 
@@ -404,16 +404,53 @@
     };
   }
 
-  // --- 超高頻度描画ループ (requestAnimationFrame) ---
+  // --- 超高速・差分描画ループ (requestAnimationFrame) ---
   function startRenderLoop() {
     if (animationFrameId) return;
     function renderStep() {
       if (pendingPoints.length > 0 && currentStroke) {
-        pendingPoints.forEach(p => currentStroke.points.push(p));
+        // 新しい点のみを追加して、その部分だけを局所的に描画（差分描画により全再描画のラグを排除）
+        const pts = currentStroke.points;
+        const startIdx = pts.length;
+        pendingPoints.forEach(p => pts.push(p));
         pendingPoints = [];
-        redrawCanvas();
-        drawSingleStroke(currentStroke);
+
+        ctx.save();
+        ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+        ctx.beginPath();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = currentStroke.size;
+
+        if (currentStroke.type === 'eraser') {
+          ctx.globalCompositeOperation = 'destination-out';
+        } else {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = currentStroke.color;
+        }
+
+        if (pts.length >= 2) {
+          const prev = pts[startIdx > 1 ? startIdx - 1 : 0];
+          const curr = pts[startIdx];
+          if (curr) {
+            ctx.moveTo(prev.x, prev.y);
+            let midX = (prev.x + curr.x) / 2;
+            let midY = (prev.y + curr.y) / 2;
+            ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
+            for (let i = startIdx + 1; i < pts.length; i++) {
+              let p1 = pts[i - 1];
+              let p2 = pts[i];
+              let mX = (p1.x + p2.x) / 2;
+              let mY = (p1.y + p2.y) / 2;
+              ctx.quadraticCurveTo(p1.x, p1.y, mX, mY);
+            }
+            ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
       }
+
       if (isDrawing || isMovingSelection || activeHandle) {
         animationFrameId = requestAnimationFrame(renderStep);
       } else {
@@ -525,7 +562,6 @@
     } else if (currentMode === 'stroke-eraser') {
       eraseStrokeAtPos(pos);
     } else if (currentStroke) {
-      // getCoalescedEvents を通して中間の隠れ座標を極限まで収集
       const events = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e];
       events.forEach(ev => {
         const p = getPosFromClient(ev.clientX, ev.clientY);
@@ -549,7 +585,6 @@
     if (!isDrawing) return;
     isDrawing = false;
 
-    // 残りのバッファを強制フラッシュ
     if (pendingPoints.length > 0 && currentStroke) {
       pendingPoints.forEach(p => currentStroke.points.push(p));
       pendingPoints = [];
@@ -567,6 +602,8 @@
         saveToLocalStorage();
       }
       currentStroke = null;
+      // 描き終わりに全体を再描画して綺麗に確定
+      redrawCanvas();
     }
   }
 
@@ -726,7 +763,7 @@
     selectionBoundingBox = { minX, minY, maxX, maxY };
   }
 
-   function getTouchedHandle(pos, box) {
+  function getTouchedHandle(pos, box) {
     const pad = 10 / scale;
     const radius = 16 / scale;
 
