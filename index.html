@@ -12,7 +12,7 @@
 
 <title>計算・勉強用 手描きノートアプリ</title>
 
-<!-- キャッシュトラブル（古いコードの残存）を防ぐための自動クリア設定 -->
+<!-- 古いキャッシュの自動クリア -->
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then(function(registrations) {
@@ -159,7 +159,7 @@
     <div class="color-btn-wrapper" id="color-picker-container">
       <button id="color-toggle-btn" class="color-toggle-btn" type="button">
         <span id="color-dot" class="color-dot"></span>
-        <span id="color-label">1</span>
+        <span id="color-label">2</span>
       </button>
       <input type="color" id="pen-color" value="#000000" onchange="updateCustomColor(this.value)">
     </div>
@@ -223,15 +223,18 @@
   let pendingPoints = [];
   let animationFrameId = null;
 
-  // --- 自動保存・読み込み処理 ---
+  // ====================================================
+  // 【最重要】保存と読み込みの完全管理
+  // ====================================================
   const STORAGE_KEY = 'handwriting_note_data';
 
   function saveToLocalStorage() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(strokes));
-      console.log('保存成功: ストローク数 =', strokes.length);
+      const jsonString = JSON.stringify(strokes);
+      localStorage.setItem(STORAGE_KEY, jsonString);
+      console.log('✅ 保存成功: ストローク数 =', strokes.length);
     } catch (e) {
-      console.error('保存に失敗しました', e);
+      console.error('❌ 保存失敗:', e);
     }
   }
 
@@ -242,15 +245,18 @@
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
           strokes = parsed;
-          console.log('読み込み成功: ストローク数 =', strokes.length);
+          console.log('📂 読み込み成功: ストローク数 =', strokes.length);
         }
+      } else {
+        console.log('ℹ️ 保存データはありません（新規）');
       }
     } catch (e) {
-      console.error('読み込みに失敗しました', e);
+      console.error('❌ 読み込み失敗:', e);
+      strokes = [];
     }
   }
 
-  // --- 初期化処理（一番最初にデータを確実に読み込む） ---
+  // --- 起動時に【一番最初】にデータを読み込む ---
   loadFromLocalStorage();
 
   // --- 色選択処理（黒/赤切り替え & 長押しピッカー） ---
@@ -312,7 +318,7 @@
     canvas.width = container.clientWidth;
     canvas.height = container.clientHeight;
     updateGridSize();
-    redrawCanvas();
+    redrawCanvas(); // リサイズ時も既存の strokes を維持して再描画
   }
 
   window.addEventListener('resize', resizeCanvas);
@@ -587,7 +593,7 @@
       isMovingSelection = false;
       dragStartPos = null;
       recalculateBoundingBox();
-      saveToLocalStorage();
+      saveToLocalStorage(); // 変形・移動終了時に保存
       return;
     }
 
@@ -608,7 +614,7 @@
     } else if (currentStroke) {
       if (currentStroke.points.length > 0) {
         strokes.push(currentStroke);
-        saveToLocalStorage(); // 描画終了時に確実に保存
+        saveToLocalStorage(); // 【重要】新しい線を描き終えた瞬間に確実に保存！
       }
       currentStroke = null;
       redrawCanvas();
@@ -668,7 +674,7 @@
     }
   });
 
-  // --- 自動スクロール処理 ---
+// --- 自動スクロール処理 ---
   function startAutoScrollLoop() {
     if (autoScrollTimer) return;
     autoScrollTimer = setInterval(() => {
@@ -815,7 +821,7 @@
 
     if (erased) {
       redrawCanvas();
-      saveToLocalStorage();
+      saveToLocalStorage(); // 消去時も保存
     }
   }
 
@@ -975,7 +981,7 @@
 
     strokes = strokes.filter((_, idx) => !selectedStrokeIndices.includes(idx));
     clearSelection();
-    saveToLocalStorage();
+    saveToLocalStorage(); // 削除時も保存
   }
 
   function undo() {
@@ -984,7 +990,7 @@
       clearSelection();
       redrawCanvas();
       updateUndoButton();
-      saveToLocalStorage();
+      saveToLocalStorage(); // アンドゥ時も保存
     }
   }
 
@@ -995,11 +1001,11 @@
       strokes = [];
       clearSelection();
       redrawCanvas();
-      saveToLocalStorage();
+      saveToLocalStorage(); // 全消去時も保存
     }
   }
 
-  // --- 初期化処理 ---
+  // --- 初期化完了の実行 ---
   resizeCanvas();
   updateUndoButton();
 </script>
