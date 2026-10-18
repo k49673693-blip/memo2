@@ -222,8 +222,9 @@
   let pendingPoints = [];
   let animationFrameId = null;
 
-  // --- 自動保存・読み込み処理（キーを一つに統一） ---
+  // --- 自動保存・読み込み処理（保存先キーの統一とデータ移行） ---
   const STORAGE_KEY = 'handwriting_note_data';
+  const OLD_STORAGE_KEY_V2 = 'handwriting_note_data_v2';
 
   function saveToLocalStorage() {
     try {
@@ -235,11 +236,24 @@
 
   function loadFromLocalStorage() {
     try {
+      // 1. メインの保存先から読み込み
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
           strokes = parsed;
+        }
+      }
+
+      // 2. 旧バージョンキー（v2など）にデータが残っている場合の救済・統合
+      const oldSaved = localStorage.getItem(OLD_STORAGE_KEY_V2);
+      if (oldSaved) {
+        const oldParsed = JSON.parse(oldSaved);
+        if (Array.isArray(oldParsed) && oldParsed.length > 0) {
+          // 重複を防ぎつつ結合
+          strokes = strokes.concat(oldParsed);
+          saveToLocalStorage(); // メインキーに保存し直す
+          localStorage.removeItem(OLD_STORAGE_KEY_V2); // 古いキーは削除
         }
       }
     } catch (e) {
@@ -662,7 +676,7 @@
     }
   });
 
-  // --- 自動スクロール処理 ---
+ // --- 自動スクロール処理 ---
   function startAutoScrollLoop() {
     if (autoScrollTimer) return;
     autoScrollTimer = setInterval(() => {
@@ -993,7 +1007,7 @@
     }
   }
 
-  // --- 初期化処理 ---
+  // --- 初期化処理（データのロードを先に行う） ---
   loadFromLocalStorage();
   resizeCanvas();
   updateUndoButton();
